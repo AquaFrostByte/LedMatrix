@@ -1,0 +1,7 @@
+.env
+data/
+mosquitto/passwd
+esp32/ledmatrix/config.h
+__pycache__/
+.venv/
+*.pyc

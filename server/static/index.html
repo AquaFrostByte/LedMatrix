@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LED Matrix</title>
+<style>
+  :root {
+    --bg: #0f1115; --card: #181b22; --line: #2a2f3a; --text: #e8eaf0; --dim: #8b92a3;
+    --accent: #ffb938; --ok: #3ddc84; --bad: #ff5c5c;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f2f3f6; --card: #fff; --line: #dcdfe6; --text: #1b1e25; --dim: #6a7180; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  header { display: flex; justify-content: space-between; align-items: center; }
+  h1 { font-size: 20px; margin: 0; }
+  .pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+  .pill.on { color: var(--ok); border-color: var(--ok); }
+  .pill.off { color: var(--bad); border-color: var(--bad); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+  .card h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .row > label { min-width: 90px; color: var(--dim); }
+  .grow { flex: 1; min-width: 120px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=text], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+  input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; }
+  button { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #1b1300; border-color: var(--accent); font-weight: 600; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; }
+  .seg button.active { background: var(--accent); color: #1b1300; font-weight: 600; }
+  .switch { position: relative; width: 44px; height: 24px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .15s; cursor: pointer; }
+  .switch span::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+  .switch input:checked + span { background: var(--accent); }
+  .switch input:checked + span::before { transform: translateX(20px); }
+  .gifs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
+  .gif { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 6px; justify-items: center; }
+  .gif.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .gif img { width: 96px; height: 96px; image-rendering: pixelated; background: #000; border-radius: 4px; cursor: pointer; }
+  .gif .name { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gif button { padding: 3px 8px; font-size: 12px; }
+  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--dim); cursor: pointer; }
+  .drop.over { border-color: var(--accent); color: var(--text); }
+  .msg { font-size: 13px; color: var(--dim); min-height: 1.2em; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>LED Matrix</h1>
+    <span id="conn" class="pill">…</span>
+  </header>
+
+  <section class="card">
+    <h2>Display</h2>
+    <div class="row"><label>Power</label>
+      <label class="switch"><input type="checkbox" id="power"><span></span></label></div>
+    <div class="row"><label>Brightness</label>
+      <div class="grow"><input type="range" id="brightness" min="0" max="255"></div><span id="brightnessVal"></span></div>
+    <div class="row"><label>Colour</label><input type="color" id="color">
+      <span class="msg">used for clock, text and Game of Life</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Mode</h2>
+    <div class="row"><label>GIF background</label>
+      <label class="switch"><input type="checkbox" id="gif_enabled"><span></span></label></div>
+    <div class="row"><label>Overlay</label>
+      <div class="seg" id="overlay">
+        <button data-v="none">None</button><button data-v="clock">Clock</button>
+        <button data-v="text">Text</button><button data-v="life">Life</button>
+      </div></div>
+    <div class="row"><label>24h clock</label>
+      <label class="switch"><input type="checkbox" id="clock_24h"><span></span></label></div>
+    <div class="row"><label>Text</label>
+      <input type="text" id="text" class="grow" maxlength="100" placeholder="Scrolling text">
+      <select id="text_size">
+        <option value="1">Small</option><option value="2">Normal</option>
+        <option value="3">Big</option><option value="4">Huge</option>
+      </select></div>
+    <div class="row"><label>Scroll delay</label>
+      <div class="grow"><input type="range" id="scroll_delay" min="1" max="150"></div>
+      <span id="scrollVal"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>GIFs</h2>
+    <div class="gifs" id="gifs"></div>
+    <div class="drop" id="drop">Drop GIF / PNG / JPG here or click to upload
+      <input type="file" id="file" accept="image/*" multiple hidden></div>
+    <div class="row"><label>Fit</label>
+      <select id="fit">
+        <option value="contain">Contain (keep aspect)</option>
+        <option value="cover">Cover (crop)</option>
+        <option value="stretch">Stretch</option>
+      </select></div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Device</h2>
+    <div class="msg" id="device"></div>
+    <div class="row"><button id="reboot">Reboot ESP32</button></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let S = {}, gifs = [];
+let busyUntil = 0;   // don't overwrite controls while the user is dragging them
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  return r.json();
+}
+function patch(obj) {
+  busyUntil = Date.now() + 1500;
+  Object.assign(S, obj);
+  return api('/api/state', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(obj)})
+    .catch(e => msg(e.message));
+}
+const debounce = (fn, ms = 120) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const msg = t => $('msg').textContent = t;
+const hex = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
+const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+
+function render(data) {
+  S = data.state; gifs = data.gifs;
+  const idle = Date.now() > busyUntil;
+  if (idle) {
+    $('power').checked = S.power;
+    $('brightness').value = S.brightness;
+    $('color').value = hex(S.color);
+    $('gif_enabled').checked = S.gif_enabled;
+    $('clock_24h').checked = S.clock_24h;
+    $('scroll_delay').value = S.scroll_delay;
+    $('text_size').value = S.text_size;
+    if (document.activeElement !== $('text')) $('text').value = S.text;
+  }
+  $('brightnessVal').textContent = $('brightness').value;
+  $('scrollVal').textContent = $('scroll_delay').value + ' ms';
+  document.querySelectorAll('#overlay button').forEach(b => b.classList.toggle('active', b.dataset.v === S.overlay));
+
+  const e = data.esp, c = $('conn');
+  c.textContent = e.online ? 'ESP32 online' : (e.mqtt ? 'ESP32 offline' : 'MQTT down');
+  c.className = 'pill ' + (e.online ? 'on' : 'off');
+  $('device').textContent = e.online && e.ip
+    ? `${e.ip} · ${e.rssi} dBm · ${Math.round((e.free_heap || 0) / 1024)} KB heap free · fw ${e.fw} · up ${Math.round((e.uptime || 0) / 60)} min`
+    : 'No telemetry yet.';
+
+  const box = $('gifs');
+  const sig = JSON.stringify([gifs, S.gif]);
+  if (box.dataset.sig === sig) return;
+  box.dataset.sig = sig;
+  box.replaceChildren();
+  if (!gifs.length) box.textContent = 'No GIFs yet — upload one below.';
+  for (const n of gifs) {
+    const d = document.createElement('div'); d.className = 'gif' + (n === S.gif ? ' active' : '');
+    const img = document.createElement('img'); img.src = '/gifs/' + n; img.onclick = () => patch({gif: n, gif_enabled: true});
+    const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = n;
+    const del = document.createElement('button'); del.textContent = 'Delete';
+    del.onclick = async () => { if (confirm('Delete ' + n + '?')) { await api('/api/gifs/' + n, {method: 'DELETE'}); refresh(); } };
+    d.append(img, nm, del); box.append(d);
+  }
+}
+
+async function refresh() { try { render(await api('/api/state')); } catch (e) { $('conn').textContent = 'server error'; $('conn').className = 'pill off'; } }
+
+$('power').onchange = e => patch({power: e.target.checked});
+$('brightness').oninput = debounce(e => patch({brightness: +e.target.value}));
+$('brightness').addEventListener('input', e => $('brightnessVal').textContent = e.target.value);
+$('color').oninput = debounce(e => patch({color: rgb(e.target.value)}), 80);
+$('gif_enabled').onchange = e => patch({gif_enabled: e.target.checked});
+$('clock_24h').onchange = e => patch({clock_24h: e.target.checked});
+$('text_size').onchange = e => patch({text_size: +e.target.value});
+$('scroll_delay').oninput = debounce(e => patch({scroll_delay: +e.target.value}));
+$('scroll_delay').addEventListener('input', e => $('scrollVal').textContent = e.target.value + ' ms');
+$('text').oninput = debounce(e => patch({text: e.target.value}), 400);
+document.querySelectorAll('#overlay button').forEach(b => b.onclick = () => { patch({overlay: b.dataset.v}); refresh(); });
+$('reboot').onclick = () => confirm('Reboot the ESP32?') && api('/api/reboot', {method: 'POST'});
+
+async function upload(files) {
+  for (const f of files) {
+    msg('Converting ' + f.name + ' …');
+    const fd = new FormData(); fd.append('file', f); fd.append('fit', $('fit').value); fd.append('play', 'true');
+    try { const r = await api('/api/gifs', {method: 'POST', body: fd}); msg(`${r.name}: ${Math.round(r.bytes / 1024)} KB`); }
+    catch (e) { msg(f.name + ': ' + e.message); }
+  }
+  refresh();
+}
+const drop = $('drop');
+drop.onclick = () => $('file').click();
+$('file').onchange = e => upload(e.target.files);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
+
+refresh(); setInterval(refresh, 2000);
+</script>
+</body>
+</html>
