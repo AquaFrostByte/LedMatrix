@@ -3,6 +3,7 @@
 The server is the source of truth. The full desired state is published retained on
 <BASE_TOPIC>/set, so the ESP32 gets the right state as soon as it (re)connects.
 """
+import base64
 import io
 import json
 import logging
@@ -38,7 +39,10 @@ UI_PASS = os.getenv("UI_PASS", "")
 DATA = Path(os.getenv("DATA_DIR") or Path(__file__).resolve().parent / "data")  # Docker sets DATA_DIR=/data
 GIF_DIR = DATA / "gifs"
 STATE_FILE = DATA / "state.json"
+PATTERN_DIR = DATA / "patterns"       # saved Game of Life patterns (base64 grids)
+LIFE_FILE = DATA / "life_current.b64"  # the grid last sent to the display
 GIF_DIR.mkdir(parents=True, exist_ok=True)
+PATTERN_DIR.mkdir(parents=True, exist_ok=True)
 
 PANEL = 64
 MAX_UPLOAD = 25 * 1024 * 1024
@@ -50,7 +54,9 @@ TEXT_SIZES = {"Small": 1, "Normal": 2, "Big": 3, "Huge": 4}
 DEFAULT_STATE = {
     "power": True,
     "brightness": 100,
-    "color": [255, 255, 255],
+    "clock_color": [255, 255, 255],
+    "text_color": [255, 255, 255],
+    "life_color": [0, 255, 100],
     "gif_enabled": True,
     "gif": "",
     "overlay": "clock",
@@ -58,6 +64,10 @@ DEFAULT_STATE = {
     "text_size": 2,
     "scroll_delay": 18,
     "clock_24h": True,
+    "life_run": True,
+    "life_speed": 100,      # ms per generation
+    "life_wrap": True,      # False = dead edges
+    "life_reseed": False,   # restart with random cells when it dies
 }
 
 lock = threading.RLock()
@@ -69,7 +79,11 @@ esp = {"online": False}
 def load_state():
     if STATE_FILE.exists():
         try:
-            state.update({k: v for k, v in json.loads(STATE_FILE.read_text()).items() if k in DEFAULT_STATE})
+            saved = json.loads(STATE_FILE.read_text())
+            if "color" in saved:  # older versions had one shared colour
+                for k in ("clock_color", "text_color", "life_color"):
+                    saved.setdefault(k, saved["color"])
+            state.update({k: v for k, v in saved.items() if k in DEFAULT_STATE})
         except Exception:
             log.exception("could not read state file, using defaults")
 
@@ -103,8 +117,15 @@ def sanitize(p: dict) -> dict:
         out["power"] = bool(p["power"])
     if "brightness" in p:
         out["brightness"] = clamp(p["brightness"], 0, 255)
-    if "color" in p and isinstance(p["color"], (list, tuple)) and len(p["color"]) == 3:
-        out["color"] = [clamp(x, 0, 255) for x in p["color"]]
+    def rgb(v):
+        return [clamp(x, 0, 255) for x in v] if isinstance(v, (list, tuple)) and len(v) == 3 else None
+
+    if rgb(p.get("color")):  # one colour for everything (e.g. the Home Assistant light)
+        for k in ("clock_color", "text_color", "life_color"):
+            out[k] = rgb(p["color"])
+    for k in ("clock_color", "text_color", "life_color"):
+        if rgb(p.get(k)):
+            out[k] = rgb(p[k])
     if "gif_enabled" in p:
         out["gif_enabled"] = bool(p["gif_enabled"])
     if "gif" in p:
@@ -120,6 +141,14 @@ def sanitize(p: dict) -> dict:
         out["scroll_delay"] = clamp(p["scroll_delay"], 1, 150)
     if "clock_24h" in p:
         out["clock_24h"] = bool(p["clock_24h"])
+    if "life_run" in p:
+        out["life_run"] = bool(p["life_run"])
+    if "life_speed" in p:
+        out["life_speed"] = clamp(p["life_speed"], 10, 2000)
+    if "life_wrap" in p:
+        out["life_wrap"] = bool(p["life_wrap"])
+    if "life_reseed" in p:
+        out["life_reseed"] = bool(p["life_reseed"])
     return out
 
 
@@ -159,7 +188,7 @@ def publish_ha_state():
             "state": "ON" if state["power"] else "OFF",
             "brightness": state["brightness"],
             "color_mode": "rgb",
-            "color": dict(zip("rgb", state["color"])),
+            "color": dict(zip("rgb", state["text_color"])),
         }
         misc = {
             "gif_enabled": "ON" if state["gif_enabled"] else "OFF",
@@ -169,6 +198,9 @@ def publish_ha_state():
             "text": state["text"],
             "text_size": size_label,
             "scroll_delay": state["scroll_delay"],
+            "life_run": "ON" if state["life_run"] else "OFF",
+            "life_wrap": "ON" if state["life_wrap"] else "OFF",
+            "life_speed": state["life_speed"],
         }
     client.publish(f"{T}/ha/light/state", json.dumps(light), retain=True)
     client.publish(f"{T}/ha/state", json.dumps(misc), retain=True)
@@ -196,7 +228,8 @@ def publish_discovery():
         "command_topic": f"{T}/ha/light/set", "state_topic": f"{T}/ha/light/state",
         "brightness": True, "brightness_scale": 255, "supported_color_modes": ["rgb"],
     })
-    for key, name in (("gif_enabled", "GIF background"), ("clock_24h", "24 hour clock")):
+    for key, name in (("gif_enabled", "GIF background"), ("clock_24h", "24 hour clock"),
+                      ("life_run", "Life running"), ("life_wrap", "Life wrap edges")):
         cfg("switch", key, {
             "name": name, "state_topic": st_topic, "command_topic": f"{T}/ha/{key}/set",
             "value_template": "{{ value_json.%s }}" % key, "payload_on": "ON", "payload_off": "OFF",
@@ -221,6 +254,11 @@ def publish_discovery():
         "name": "Scroll delay", "min": 1, "max": 150, "step": 1, "mode": "slider",
         "unit_of_measurement": "ms", "state_topic": st_topic,
         "command_topic": f"{T}/ha/scroll_delay/set", "value_template": "{{ value_json.scroll_delay }}",
+    })
+    cfg("number", "life_speed", {
+        "name": "Life step time", "min": 10, "max": 2000, "step": 10, "mode": "slider",
+        "unit_of_measurement": "ms", "state_topic": st_topic,
+        "command_topic": f"{T}/ha/life_speed/set", "value_template": "{{ value_json.life_speed }}",
     })
     cfg("button", "reboot", {
         "name": "Reboot", "command_topic": f"{T}/ha/reboot/set", "payload_press": "PRESS",
@@ -249,7 +287,7 @@ def handle_ha_command(key: str, payload: str):
         if isinstance(d.get("color"), dict):
             patch["color"] = [d["color"].get("r", 255), d["color"].get("g", 255), d["color"].get("b", 255)]
         apply_patch(patch)
-    elif key in ("gif_enabled", "clock_24h"):
+    elif key in ("gif_enabled", "clock_24h", "life_run", "life_wrap"):
         apply_patch({key: on})
     elif key == "overlay":
         apply_patch({"overlay": payload.strip()})
@@ -261,6 +299,8 @@ def handle_ha_command(key: str, payload: str):
         apply_patch({"text": payload})
     elif key == "scroll_delay":
         apply_patch({"scroll_delay": float(payload)})
+    elif key == "life_speed":
+        apply_patch({"life_speed": float(payload)})
     elif key == "reboot":
         publish_cmd(reboot=True)
 
@@ -440,6 +480,83 @@ def delete_gif(name: str):
 def reboot():
     publish_cmd(reboot=True)
     return {"ok": True}
+
+
+# ---- Game of Life editor ----------------------------------------------------
+# A grid travels as base64 of 512 bytes: cell i = y*64+x is bit (i & 7) of byte (i >> 3).
+def decode_grid(b64) -> bytes:
+    try:
+        raw = base64.b64decode(str(b64), validate=True)
+    except Exception:
+        raise HTTPException(400, "Grid is not valid base64")
+    if len(raw) != PANEL * PANEL // 8:
+        raise HTTPException(400, "Grid must be 64x64 cells")
+    return raw
+
+
+def pattern_name(raw) -> str:
+    name = re.sub(r"[^a-z0-9_-]+", "_", str(raw).lower().translate(_TRANS)).strip("_")[:32]
+    if not name:
+        raise HTTPException(400, "Invalid name")
+    return name
+
+
+@app.get("/api/life", dependencies=[Depends(auth)])
+def get_life():
+    return {"grid": LIFE_FILE.read_text().strip() if LIFE_FILE.exists() else None}
+
+
+@app.post("/api/life", dependencies=[Depends(auth)])
+def send_life(body: dict):
+    decode_grid(body.get("grid", ""))
+    grid = str(body["grid"])
+    LIFE_FILE.write_text(grid)
+    # retained, so the pattern is restored after an ESP reboot; sent before the mode switch
+    client.publish(f"{T}/life/set", grid, qos=1, retain=True)
+    apply_patch({"overlay": "life", "life_run": bool(body.get("run", True))})
+    return {"ok": True}
+
+
+@app.post("/api/life/step", dependencies=[Depends(auth)])
+def life_step():
+    publish_cmd(life_step=True)
+    return {"ok": True}
+
+
+@app.post("/api/life/random", dependencies=[Depends(auth)])
+def life_random():
+    publish_cmd(life_random=True)
+    return {"ok": True}
+
+
+@app.get("/api/patterns", dependencies=[Depends(auth)])
+def list_patterns():
+    return sorted(p.stem for p in PATTERN_DIR.glob("*.b64"))
+
+
+@app.get("/api/patterns/{name}", dependencies=[Depends(auth)])
+def get_pattern(name: str):
+    path = PATTERN_DIR / f"{pattern_name(name)}.b64"
+    if not path.exists():
+        raise HTTPException(404, "Not found")
+    return {"name": path.stem, "grid": path.read_text().strip()}
+
+
+@app.post("/api/patterns", dependencies=[Depends(auth)])
+def save_pattern(body: dict):
+    name = pattern_name(body.get("name", ""))
+    decode_grid(body.get("grid", ""))
+    (PATTERN_DIR / f"{name}.b64").write_text(str(body["grid"]))
+    return {"name": name}
+
+
+@app.delete("/api/patterns/{name}", dependencies=[Depends(auth)])
+def delete_pattern(name: str):
+    path = PATTERN_DIR / f"{pattern_name(name)}.b64"
+    if not path.exists():
+        raise HTTPException(404, "Not found")
+    path.unlink()
+    return {"deleted": path.stem}
 
 
 # The ESP32 downloads from here, so it stays open even when UI auth is on.

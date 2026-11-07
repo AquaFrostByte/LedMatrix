@@ -24,8 +24,12 @@
   .card h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
   .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .row > label { min-width: 90px; color: var(--dim); }
+  .tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .tools label { color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
   .grow { flex: 1; min-width: 120px; }
+  .cl { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
   input[type=range] { width: 100%; accent-color: var(--accent); }
+  .tools input[type=range] { width: 110px; }
   input[type=text], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
   input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; }
   button { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
@@ -49,6 +53,8 @@
   .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--dim); cursor: pointer; }
   .drop.over { border-color: var(--accent); color: var(--text); }
   .msg { font-size: 13px; color: var(--dim); min-height: 1.2em; }
+  #lifeCv { width: 100%; max-width: 640px; aspect-ratio: 1; display: block; margin: 0 auto; cursor: crosshair;
+    touch-action: none; border: 1px solid var(--line); border-radius: 8px; background: #1a1e27; }
 </style>
 </head>
 <body>
@@ -64,8 +70,11 @@
       <label class="switch"><input type="checkbox" id="power"><span></span></label></div>
     <div class="row"><label>Brightness</label>
       <div class="grow"><input type="range" id="brightness" min="0" max="255"></div><span id="brightnessVal"></span></div>
-    <div class="row"><label>Colour</label><input type="color" id="color">
-      <span class="msg">used for clock, text and Game of Life</span></div>
+    <div class="row"><label>Colours</label>
+      <span class="cl">Clock <input type="color" id="clock_color"></span>
+      <span class="cl">Text <input type="color" id="text_color"></span>
+      <span class="cl">Life <input type="color" id="life_color"></span>
+      <button id="sameColor" title="Use the clock colour for text and Game of Life too">Same for all</button></div>
   </section>
 
   <section class="card">
@@ -88,6 +97,61 @@
     <div class="row"><label>Scroll delay</label>
       <div class="grow"><input type="range" id="scroll_delay" min="1" max="150"></div>
       <span id="scrollVal"></span></div>
+  </section>
+
+  <section class="card">
+    <h2>Game of Life</h2>
+    <div class="row"><label>Running</label>
+      <label class="switch"><input type="checkbox" id="life_run"><span></span></label>
+      <button id="lifeStepBtn">Step</button>
+      <button id="lifeRandom">Random</button></div>
+    <div class="row"><label>Step time</label>
+      <div class="grow"><input type="range" id="life_speed" min="10" max="1000" step="10"></div>
+      <span id="lifeSpeedVal"></span></div>
+    <div class="row"><label>Wrap edges</label>
+      <label class="switch"><input type="checkbox" id="life_wrap"><span></span></label>
+      <span class="msg">off = gliders die at the border</span></div>
+    <div class="row"><label>Auto-restart</label>
+      <label class="switch"><input type="checkbox" id="life_reseed"><span></span></label>
+      <span class="msg">random restart when it dies out</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Pattern editor (64 × 64)</h2>
+    <canvas id="lifeCv"></canvas>
+    <div class="tools">
+      <div class="seg" id="tool">
+        <button data-v="draw" class="active">Draw</button><button data-v="erase">Erase</button><button data-v="stamp">Stamp</button>
+      </div>
+      <select id="preset"></select>
+      <button id="rot">Rotate</button>
+      <button id="flip">Mirror</button>
+    </div>
+    <div class="tools">
+      <button id="simRun">▶ Run here</button>
+      <button id="simStep">Step</button>
+      <button id="simReset">Reset</button>
+      <button id="clear">Clear</button>
+    </div>
+    <div class="tools">
+      <button class="primary" id="send">Send to display</button>
+      <label><input type="checkbox" id="sendRun" checked> start running</label>
+      <button id="loadCur">Load what's on the display</button>
+    </div>
+    <div class="tools">
+      <button id="importBtn">Import image…</button>
+      <input type="file" id="imgFile" accept="image/*" hidden>
+      <label>Threshold <input type="range" id="thr" min="1" max="254" value="128"></label>
+      <label><input type="checkbox" id="inv"> invert</label>
+    </div>
+    <div class="tools">
+      <input type="text" id="patName" placeholder="Name" maxlength="32" style="width:140px">
+      <button id="patSave">Save</button>
+      <select id="patList"></select>
+      <button id="patLoad">Load</button>
+      <button id="patDel">Delete</button>
+    </div>
+    <div class="msg" id="lmsg">Click or drag to draw. Choose a preset and "Stamp" to place it. "Run here" simulates in your browser; "Send to display" puts the current grid on the matrix.</div>
   </section>
 
   <section class="card">
@@ -121,16 +185,19 @@ async function api(path, opts) {
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
   return r.json();
 }
+const postJSON = (path, obj) => api(path, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(obj)});
 function patch(obj) {
   busyUntil = Date.now() + 1500;
   Object.assign(S, obj);
-  return api('/api/state', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(obj)})
-    .catch(e => msg(e.message));
+  return postJSON('/api/state', obj).catch(e => msg(e.message));
 }
 const debounce = (fn, ms = 120) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const msg = t => $('msg').textContent = t;
+const lmsg = t => $('lmsg').textContent = t;
 const hex = c => '#' + c.map(v => v.toString(16).padStart(2, '0')).join('');
 const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+const fmtBytes = v => v > 1e9 ? (v / 1e9).toFixed(1) + ' GB' : Math.round(v / 1e6) + ' MB';
+const COLOR_KEYS = ['clock_color', 'text_color', 'life_color'];
 
 function render(data) {
   S = data.state; gifs = data.gifs;
@@ -138,24 +205,32 @@ function render(data) {
   if (idle) {
     $('power').checked = S.power;
     $('brightness').value = S.brightness;
-    $('color').value = hex(S.color);
+    for (const k of COLOR_KEYS) if (S[k]) $(k).value = hex(S[k]);
     $('gif_enabled').checked = S.gif_enabled;
     $('clock_24h').checked = S.clock_24h;
     $('scroll_delay').value = S.scroll_delay;
     $('text_size').value = S.text_size;
+    $('life_run').checked = S.life_run;
+    $('life_speed').value = S.life_speed;
+    $('life_wrap').checked = S.life_wrap;
+    $('life_reseed').checked = S.life_reseed;
     if (document.activeElement !== $('text')) $('text').value = S.text;
   }
   $('brightnessVal').textContent = $('brightness').value;
   $('scrollVal').textContent = $('scroll_delay').value + ' ms';
+  $('lifeSpeedVal').textContent = $('life_speed').value + ' ms';
   document.querySelectorAll('#overlay button').forEach(b => b.classList.toggle('active', b.dataset.v === S.overlay));
 
   const e = data.esp, c = $('conn');
   c.textContent = e.online ? 'ESP32 online' : (e.mqtt ? 'ESP32 offline' : 'MQTT down');
   c.className = 'pill ' + (e.online ? 'on' : 'off');
   $('device').textContent = e.online && e.ip
-    ? `${e.ip} · ${e.rssi} dBm · ${Math.round((e.free_heap || 0) / 1024)} KB heap free · fw ${e.fw} · up ${Math.round((e.uptime || 0) / 60)} min`
+    ? `${e.ip} · ${e.rssi} dBm · ${Math.round((e.free_heap || 0) / 1024)} KB heap free · fw ${e.fw}`
+      + (e.storage ? ` · ${e.storage === 'sd' ? 'SD card' : 'flash'} ${fmtBytes(e.fs_free || 0)} free` : '')
+      + ` · up ${Math.round((e.uptime || 0) / 60)} min`
     : 'No telemetry yet.';
 
+  drawEditor();
   const box = $('gifs');
   const sig = JSON.stringify([gifs, S.gif]);
   if (box.dataset.sig === sig) return;
@@ -174,10 +249,19 @@ function render(data) {
 
 async function refresh() { try { render(await api('/api/state')); } catch (e) { $('conn').textContent = 'server error'; $('conn').className = 'pill off'; } }
 
+// ---- basic controls
 $('power').onchange = e => patch({power: e.target.checked});
 $('brightness').oninput = debounce(e => patch({brightness: +e.target.value}));
 $('brightness').addEventListener('input', e => $('brightnessVal').textContent = e.target.value);
-$('color').oninput = debounce(e => patch({color: rgb(e.target.value)}), 80);
+for (const k of COLOR_KEYS) {
+  $(k).oninput = debounce(e => { patch({[k]: rgb(e.target.value)}); drawEditor(); }, 80);
+}
+$('sameColor').onclick = () => {
+  const c = rgb($('clock_color').value);
+  for (const k of COLOR_KEYS) $(k).value = hex(c);
+  patch({color: c});
+  drawEditor();
+};
 $('gif_enabled').onchange = e => patch({gif_enabled: e.target.checked});
 $('clock_24h').onchange = e => patch({clock_24h: e.target.checked});
 $('text_size').onchange = e => patch({text_size: +e.target.value});
@@ -187,6 +271,16 @@ $('text').oninput = debounce(e => patch({text: e.target.value}), 400);
 document.querySelectorAll('#overlay button').forEach(b => b.onclick = () => { patch({overlay: b.dataset.v}); refresh(); });
 $('reboot').onclick = () => confirm('Reboot the ESP32?') && api('/api/reboot', {method: 'POST'});
 
+// ---- Game of Life controls (running display)
+$('life_run').onchange = e => patch({life_run: e.target.checked});
+$('life_speed').oninput = debounce(e => patch({life_speed: +e.target.value}));
+$('life_speed').addEventListener('input', e => $('lifeSpeedVal').textContent = e.target.value + ' ms');
+$('life_wrap').onchange = e => patch({life_wrap: e.target.checked});
+$('life_reseed').onchange = e => patch({life_reseed: e.target.checked});
+$('lifeStepBtn').onclick = () => api('/api/life/step', {method: 'POST'}).catch(e => lmsg(e.message));
+$('lifeRandom').onclick = () => api('/api/life/random', {method: 'POST'}).catch(e => lmsg(e.message));
+
+// ---- GIF upload
 async function upload(files) {
   for (const f of files) {
     msg('Converting ' + f.name + ' …');
@@ -203,6 +297,228 @@ drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
 drop.ondragleave = () => drop.classList.remove('over');
 drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); upload(e.dataTransfer.files); };
 
+// ================================================================ pattern editor
+const N = 64, CELL = 10;
+let grid = new Uint8Array(N * N);   // current cells
+let snap = new Uint8Array(N * N);   // state to go back to with "Reset"
+let tool = 'draw', paint = null, hover = null, simTimer = null, imgData = null;
+
+const cv = $('lifeCv'), ctx = cv.getContext('2d');
+cv.width = cv.height = N * CELL;
+
+const PRESETS = {
+  'Gosper glider gun': [
+    '........................O...........',
+    '......................O.O...........',
+    '............OO......OO............OO',
+    '...........O...O....OO............OO',
+    'OO........O.....O...OO..............',
+    'OO........O...O.OO....O.O...........',
+    '..........O.....O.......O...........',
+    '...........O...O....................',
+    '............OO......................'],
+  'Glider': ['.O.', '..O', 'OOO'],
+  'Lightweight spaceship': ['.O..O', 'O....', 'O...O', 'OOOO.'],
+  'R-pentomino': ['.OO', 'OO.', '.O.'],
+  'Acorn': ['.O.....', '...O...', 'OO..OOO'],
+  'Pulsar': [
+    '..OOO...OOO..', '.............', 'O....O.O....O', 'O....O.O....O', 'O....O.O....O',
+    '..OOO...OOO..', '.............', '..OOO...OOO..', 'O....O.O....O', 'O....O.O....O',
+    'O....O.O....O', '.............', '..OOO...OOO..'],
+  'Block': ['OO', 'OO'],
+  'Blinker': ['OOO'],
+};
+const parse = rows => {
+  const cells = [];
+  rows.forEach((r, y) => [...r].forEach((c, x) => { if (c === 'O') cells.push([x, y]); }));
+  return {w: Math.max(...rows.map(r => r.length)), h: rows.length, cells};
+};
+let stampPat = parse(PRESETS['Gosper glider gun']);
+const rotate = p => ({w: p.h, h: p.w, cells: p.cells.map(([x, y]) => [p.h - 1 - y, x])});
+const mirror = p => ({w: p.w, h: p.h, cells: p.cells.map(([x, y]) => [p.w - 1 - x, y])});
+
+for (const name of Object.keys(PRESETS)) {
+  const o = document.createElement('option'); o.textContent = name; $('preset').append(o);
+}
+
+function drawEditor() {
+  const on = hex(S.life_color || [0, 255, 100]);
+  ctx.fillStyle = '#1a1e27'; ctx.fillRect(0, 0, cv.width, cv.height);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    ctx.fillStyle = grid[y * N + x] ? on : '#0c0e13';
+    ctx.fillRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1);
+  }
+  if (tool === 'stamp' && hover) {
+    ctx.fillStyle = 'rgba(255,185,56,.55)';
+    const ox = hover[0] - (stampPat.w >> 1), oy = hover[1] - (stampPat.h >> 1);
+    for (const [dx, dy] of stampPat.cells) ctx.fillRect((ox + dx) * CELL + 0.5, (oy + dy) * CELL + 0.5, CELL - 1, CELL - 1);
+  }
+}
+
+function cellAt(e) {
+  const r = cv.getBoundingClientRect();
+  return [Math.floor((e.clientX - r.left) / r.width * N), Math.floor((e.clientY - r.top) / r.height * N)];
+}
+const inBounds = (x, y) => x >= 0 && y >= 0 && x < N && y < N;
+const setCell = (x, y, v) => { if (inBounds(x, y)) grid[y * N + x] = v; };
+const takeSnap = () => { snap = grid.slice(); };
+
+function stamp(cx, cy) {
+  const ox = cx - (stampPat.w >> 1), oy = cy - (stampPat.h >> 1);
+  for (const [dx, dy] of stampPat.cells) setCell(ox + dx, oy + dy, 1);
+  takeSnap(); drawEditor();
+}
+
+cv.addEventListener('pointerdown', e => {
+  const [x, y] = cellAt(e);
+  if (!inBounds(x, y)) return;
+  if (tool === 'stamp') { stamp(x, y); return; }
+  paint = tool === 'erase' ? 0 : (grid[y * N + x] ? 0 : 1);
+  setCell(x, y, paint); drawEditor();
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener('pointermove', e => {
+  const [x, y] = cellAt(e);
+  hover = [x, y];
+  if (paint !== null) setCell(x, y, paint);
+  drawEditor();
+});
+const endPaint = () => { if (paint !== null) { paint = null; takeSnap(); } };
+cv.addEventListener('pointerup', endPaint);
+cv.addEventListener('pointercancel', endPaint);
+cv.addEventListener('pointerleave', () => { hover = null; drawEditor(); });
+
+document.querySelectorAll('#tool button').forEach(b => b.onclick = () => {
+  tool = b.dataset.v;
+  document.querySelectorAll('#tool button').forEach(x => x.classList.toggle('active', x === b));
+  drawEditor();
+});
+const selectStamp = () => {
+  stampPat = parse(PRESETS[$('preset').value]);
+  tool = 'stamp';
+  document.querySelectorAll('#tool button').forEach(x => x.classList.toggle('active', x.dataset.v === 'stamp'));
+  drawEditor();
+};
+$('preset').onchange = selectStamp;
+$('rot').onclick = () => { stampPat = rotate(stampPat); drawEditor(); };
+$('flip').onclick = () => { stampPat = mirror(stampPat); drawEditor(); };
+$('clear').onclick = () => { stopSim(); grid.fill(0); takeSnap(); drawEditor(); };
+
+// ---- local simulation (same rules as the ESP32)
+function stepLocal() {
+  const wrap = S.life_wrap !== false;
+  const nx = new Uint8Array(N * N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      let yy = y + dy, xx = x + dx;
+      if (wrap) { yy = (yy + N) % N; xx = (xx + N) % N; }
+      else if (yy < 0 || yy >= N || xx < 0 || xx >= N) continue;
+      n += grid[yy * N + xx];
+    }
+    const alive = grid[y * N + x];
+    nx[y * N + x] = alive ? (n === 2 || n === 3 ? 1 : 0) : (n === 3 ? 1 : 0);
+  }
+  grid = nx; drawEditor();
+}
+function stopSim() { if (simTimer) { clearInterval(simTimer); simTimer = null; } $('simRun').textContent = '▶ Run here'; }
+$('simRun').onclick = () => {
+  if (simTimer) { stopSim(); return; }
+  simTimer = setInterval(stepLocal, Math.max(30, S.life_speed || 100));
+  $('simRun').textContent = '⏸ Pause';
+};
+$('simStep').onclick = () => { stopSim(); stepLocal(); };
+$('simReset').onclick = () => { stopSim(); grid = snap.slice(); drawEditor(); };
+
+// ---- encode / decode (bit i&7 of byte i>>3, i = y*64+x), base64
+function encodeGrid() {
+  const b = new Uint8Array(N * N / 8);
+  for (let i = 0; i < N * N; i++) if (grid[i]) b[i >> 3] |= 1 << (i & 7);
+  let s = ''; b.forEach(v => s += String.fromCharCode(v));
+  return btoa(s);
+}
+function decodeGrid(b64) {
+  const s = atob(b64), g = new Uint8Array(N * N);
+  for (let i = 0; i < N * N; i++) g[i] = (s.charCodeAt(i >> 3) >> (i & 7)) & 1;
+  return g;
+}
+
+$('send').onclick = async () => {
+  stopSim();
+  try {
+    await postJSON('/api/life', {grid: encodeGrid(), run: $('sendRun').checked});
+    lmsg('Sent to the display.'); refresh();
+  } catch (e) { lmsg(e.message); }
+};
+$('loadCur').onclick = async () => {
+  try {
+    const r = await api('/api/life');
+    if (!r.grid) { lmsg('Nothing has been sent yet.'); return; }
+    stopSim(); grid = decodeGrid(r.grid); takeSnap(); drawEditor(); lmsg('Loaded the last pattern sent to the display.');
+  } catch (e) { lmsg(e.message); }
+};
+
+// ---- image import: scale to 64x64, threshold on brightness
+function applyImage() {
+  if (!imgData) return;
+  const thr = +$('thr').value, inv = $('inv').checked;
+  for (let i = 0; i < N * N; i++) {
+    const lum = 0.299 * imgData[i * 4] + 0.587 * imgData[i * 4 + 1] + 0.114 * imgData[i * 4 + 2];
+    grid[i] = (lum > thr) !== inv ? 1 : 0;
+  }
+  takeSnap(); drawEditor();
+}
+$('importBtn').onclick = () => $('imgFile').click();
+$('imgFile').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement('canvas'); c.width = c.height = N;
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#000'; cx.fillRect(0, 0, N, N);
+    const sc = Math.min(N / img.width, N / img.height), w = img.width * sc, h = img.height * sc;
+    cx.drawImage(img, (N - w) / 2, (N - h) / 2, w, h);
+    imgData = cx.getImageData(0, 0, N, N).data;
+    URL.revokeObjectURL(img.src);
+    stopSim(); applyImage();
+    lmsg('Image imported. Adjust the threshold or invert until it looks right.');
+  };
+  img.onerror = () => lmsg('Could not read that image.');
+  img.src = URL.createObjectURL(f);
+  e.target.value = '';
+};
+$('thr').oninput = applyImage;
+$('inv').onchange = applyImage;
+
+// ---- saved patterns
+async function refreshPatterns(select) {
+  try {
+    const names = await api('/api/patterns');
+    $('patList').replaceChildren(...names.map(n => { const o = document.createElement('option'); o.textContent = n; return o; }));
+    if (select) $('patList').value = select;
+  } catch (e) { /* ignore */ }
+}
+$('patSave').onclick = async () => {
+  const name = $('patName').value.trim();
+  if (!name) { lmsg('Give the pattern a name first.'); return; }
+  try { const r = await postJSON('/api/patterns', {name, grid: encodeGrid()}); lmsg('Saved as ' + r.name); refreshPatterns(r.name); }
+  catch (e) { lmsg(e.message); }
+};
+$('patLoad').onclick = async () => {
+  const n = $('patList').value; if (!n) return;
+  try { const r = await api('/api/patterns/' + encodeURIComponent(n)); stopSim(); grid = decodeGrid(r.grid); takeSnap(); drawEditor(); lmsg('Loaded ' + n); }
+  catch (e) { lmsg(e.message); }
+};
+$('patDel').onclick = async () => {
+  const n = $('patList').value;
+  if (!n || !confirm('Delete pattern ' + n + '?')) return;
+  try { await api('/api/patterns/' + encodeURIComponent(n), {method: 'DELETE'}); refreshPatterns(); lmsg('Deleted ' + n); }
+  catch (e) { lmsg(e.message); }
+};
+
+drawEditor();
+refreshPatterns();
 refresh(); setInterval(refresh, 2000);
 </script>
 </body>

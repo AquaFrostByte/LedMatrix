@@ -23,3 +23,9 @@
 // ---- Time ----
 #define TZ_INFO "CET-1CEST,M3.5.0/02,M10.5.0/03"  // Germany
 #define NTP_SERVER "ptbtime1.ptb.de"
+
+// ---- SD card (optional, these are the defaults) ----
+// #define SD_CS   5
+// #define SD_SCK  18
+// #define SD_MISO 19
+// #define SD_MOSI 23

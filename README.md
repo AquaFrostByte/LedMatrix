@@ -96,6 +96,43 @@ The ESP32 firmware now runs purely as an MQTT listener and display driver.
 * `ArduinoJson` (v7)
 *(Note: `AsyncTCP` and `ESPAsyncWebServer` are no longer required and can be safely removed.)*
 
+<<<<<<< HEAD
+- Text is ASCII only (the panel font); the server converts ä/ö/ü/ß to ae/oe/ue/ss.
+- Scroll "delay" is ms per pixel step, so lower = faster.
+- If the server is down the ESP keeps showing its last state (the clock keeps running from the RTC); it
+  picks up the retained state again on reconnect.
+- The firmware hasn't been compiled on real hardware by me – if the compiler complains about a library
+  API version, send me the error and I'll adjust.
+
+## SD card (optional but recommended)
+
+The ESP32's internal flash only holds a handful of GIFs. With an SD card module the firmware stores
+GIFs on the card instead (and falls back to flash if no card is found). Default wiring:
+
+| SD module | ESP32 GPIO |
+|---|---|
+| CS | 5 |
+| SCK | 18 |
+| MISO | 19 |
+| MOSI | 23 |
+| VCC | **5V / VIN** (modules with an onboard regulator don't work on 3.3V) |
+| GND | GND |
+
+Wired differently? Set `SD_CS`, `SD_SCK`, `SD_MISO`, `SD_MOSI` in `config.h`. Format the card as FAT32.
+The serial monitor prints `SD card mounted at … kHz` on success; the firmware retries at lower SPI
+speeds because jumper wires often can't do 20 MHz.
+
+## Colours and Game of Life
+
+- Clock, scrolling text and Game of Life each have their own colour (web UI, "Display" card).
+  Home Assistant's light sets all three at once.
+- **Pattern editor** (web UI): draw/erase cells, stamp presets (Gosper glider gun, glider, pulsar, …)
+  with rotate/mirror, import any image as a start pattern (brightness threshold), simulate in the browser,
+  then "Send to display". Patterns can be saved by name on the server.
+- The Life card controls the running simulation: run/pause, step, step time, wrap edges on/off,
+  auto-restart. Turn **wrap edges off** for a glider factory so the gliders don't loop around and hit the gun.
+- The last pattern you sent is retained on the broker, so the display restarts from it after a reboot.
+=======
 
 2. **Network Configuration:** Copy `esp32/ledmatrix/config.example.h` to `config.h` (this file is git-ignored). Define your WiFi credentials, `SERVER_URL`, `MQTT_HOST`, `MQTT_USER`, and `MQTT_PASS`.
 3. **Flashing & Data Sync:** Compile and flash `esp32/ledmatrix/ledmatrix.ino`. Legacy GIFs stored on the ESP32 are obsolete. Upload your media through the new web UI; the server will automatically convert them to 64×64 and push them to the matrix.
@@ -136,3 +173,4 @@ Previous versions suffered from visual artifacting and stuttering due to resourc
 * **Scroll Speed:** The scroll delay variable represents milliseconds per pixel step; a lower value results in faster text movement.
 * **Offline Resilience:** If the server drops offline, the ESP32 will continue looping its current state (the local RTC maintains clock accuracy). It will automatically fetch the latest retained state upon reconnection.
 * **Hardware Compilation:** The provided firmware has not been comprehensively tested on all hardware variants. If the compiler raises library API version errors, report the output for adjustments.
+>>>>>>> f4997079c83f72ac39853a27b4497639fd0d620f

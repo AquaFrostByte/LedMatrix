@@ -19,15 +19,24 @@
 #include <Adafruit_GFX.h>
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <time.h>
+#include "mbedtls/base64.h"
 #include "config.h"
 
-#define FIRMWARE_VERSION "v1.1.1"
+#define FIRMWARE_VERSION "v5.5.2"
 
 // SD card (SPI). Override any of these in config.h if you wired it differently.
-#define SD_CS   23
-#define SD_SCK  19
-#define SD_MOSI 18
-#define SD_MISO 5
+#ifndef SD_CS
+#define SD_CS 5
+#endif
+#ifndef SD_SCK
+#define SD_SCK 18
+#endif
+#ifndef SD_MISO
+#define SD_MISO 19
+#endif
+#ifndef SD_MOSI
+#define SD_MOSI 23
+#endif
 
 #define PANEL_W 64
 #define PANEL_H 64
@@ -54,7 +63,9 @@ PubSubClient mqtt(net);
 struct State {
   bool power = true;
   uint8_t brightness = 100;
-  uint8_t r = 255, g = 255, b = 255;
+  uint8_t cc[3] = {255, 255, 255};  // clock colour
+  uint8_t tc[3] = {255, 255, 255};  // scrolling text colour
+  uint8_t lc[3] = {0, 255, 100};    // game of life colour
   bool gifEnabled = true;
   String gif = "";
   String overlay = "clock";   // none | clock | text | life
@@ -62,9 +73,13 @@ struct State {
   uint8_t textSize = 2;
   uint16_t scrollDelay = 18;  // ms per pixel step
   bool clock24 = true;
+  bool lifeRun = true;        // false = paused
+  uint16_t lifeSpeed = 100;   // ms per generation
+  bool lifeWrap = true;       // false = dead edges (gliders die at the border)
+  bool lifeReseed = false;    // restart with random cells when it dies / gets stale
 } st;
 
-String tSet, tCmd, tStatus, tTelemetry;
+String tSet, tCmd, tStatus, tTelemetry, tLife;
 
 bool dirty = true;
 bool gifOpen = false;
@@ -82,7 +97,7 @@ uint8_t lifeCur = 0;
 uint32_t lifeGen = 0;
 
 // ---------------------------------------------------------------- helpers
-uint16_t userColor() { return dma_display->color565(st.r, st.g, st.b); }
+uint16_t col(const uint8_t *c) { return dma_display->color565(c[0], c[1], c[2]); }
 
 // Combine overlay over GIF and push to the panel (only when something changed)
 void present() {
@@ -250,7 +265,7 @@ void computeTextWidth() {
 }
 
 void drawClock(const struct tm &t) {
-  uint16_t c = userColor();
+  uint16_t c = col(st.cc);
   char hh[3], mm[3];
   strftime(hh, sizeof(hh), st.clock24 ? "%H" : "%I", &t);
   strftime(mm, sizeof(mm), "%M", &t);
@@ -272,7 +287,7 @@ void drawText() {
   fg->fillScreen(0);
   fg->setTextWrap(false);
   fg->setTextSize(st.textSize);
-  fg->setTextColor(userColor());
+  fg->setTextColor(col(st.tc));
   fg->setCursor(scrollX, (PANEL_H - 8 * st.textSize) / 2);
   fg->print(st.text);
 }
@@ -292,7 +307,14 @@ void lifeStep() {
       for (int dy = -1; dy <= 1; dy++)
         for (int dx = -1; dx <= 1; dx++) {
           if (!dx && !dy) continue;
-          n += life[lifeCur][(y + dy + PANEL_H) % PANEL_H][(x + dx + PANEL_W) % PANEL_W];
+          int ny = y + dy, nx2 = x + dx;
+          if (st.lifeWrap) {
+            ny = (ny + PANEL_H) % PANEL_H;
+            nx2 = (nx2 + PANEL_W) % PANEL_W;
+          } else if (ny < 0 || ny >= PANEL_H || nx2 < 0 || nx2 >= PANEL_W) {
+            continue;
+          }
+          n += life[lifeCur][ny][nx2];
         }
       bool cell = life[lifeCur][y][x] ? (n == 2 || n == 3) : (n == 3);
       life[nxt][y][x] = cell;
@@ -300,11 +322,12 @@ void lifeStep() {
     }
   }
   lifeCur = nxt;
-  if (alive == 0 || ++lifeGen > 600) lifeInit();  // reseed when dead or stale
+  lifeGen++;
+  if (st.lifeReseed && (alive == 0 || lifeGen > 600)) lifeInit();  // optional screensaver mode
 }
 
 void drawLife() {
-  uint16_t c = userColor();
+  uint16_t c = col(st.lc);
   fg->fillScreen(0);
   for (int y = 0; y < PANEL_H; y++)
     for (int x = 0; x < PANEL_W; x++)
@@ -340,7 +363,7 @@ void overlayTick(uint32_t now) {
       dirty = true;
     }
   } else if (st.overlay == "life") {
-    if (now - lastOverlayTick >= 100) {
+    if (st.lifeRun && now - lastOverlayTick >= st.lifeSpeed) {
       lastOverlayTick = now;
       lifeStep();
       drawLife();
@@ -350,6 +373,31 @@ void overlayTick(uint32_t now) {
 }
 
 // ---------------------------------------------------------------- state / MQTT
+// Pattern from the editor: base64 of 512 bytes, cell i = y*64+x is bit (i & 7) of byte (i >> 3)
+void loadLifePattern(const uint8_t *payload, unsigned int len) {
+  uint8_t raw[PANEL_W * PANEL_H / 8];
+  size_t olen = 0;
+  if (mbedtls_base64_decode(raw, sizeof(raw), &olen, payload, len) != 0 || olen != sizeof(raw)) {
+    Serial.println("Life pattern rejected (bad size)");
+    return;
+  }
+  for (int i = 0; i < PANEL_W * PANEL_H; i++)
+    life[lifeCur][i / PANEL_W][i % PANEL_W] = (raw[i >> 3] >> (i & 7)) & 1;
+  lifeGen = 0;
+  redrawOverlay = true;
+  dirty = true;
+  Serial.println("Life pattern loaded");
+}
+
+void readColor(JsonDocument &d, const char *key, uint8_t *dst) {
+  JsonArray a = d[key];
+  if (a.size() == 3) {
+    dst[0] = a[0];
+    dst[1] = a[1];
+    dst[2] = a[2];
+  }
+}
+
 void applyState(JsonDocument &d) {
   bool prevPower = st.power, prevGifEn = st.gifEnabled;
   String prevGif = st.gif, prevOverlay = st.overlay, prevText = st.text;
@@ -360,12 +408,13 @@ void applyState(JsonDocument &d) {
     st.brightness = constrain(d["brightness"].as<int>(), 0, 255);
     dma_display->setBrightness8(st.brightness);
   }
-  JsonArray c = d["color"];
-  if (c.size() == 3) {
-    st.r = c[0];
-    st.g = c[1];
-    st.b = c[2];
+  JsonArray all = d["color"];  // legacy: one colour for everything
+  if (all.size() == 3) {
+    for (int i = 0; i < 3; i++) st.cc[i] = st.tc[i] = st.lc[i] = all[i];
   }
+  readColor(d, "clock_color", st.cc);
+  readColor(d, "text_color", st.tc);
+  readColor(d, "life_color", st.lc);
   if (d["gif_enabled"].is<bool>()) st.gifEnabled = d["gif_enabled"].as<bool>();
   if (d["gif"].is<const char *>()) st.gif = d["gif"].as<const char *>();
   if (d["overlay"].is<const char *>()) st.overlay = d["overlay"].as<const char *>();
@@ -373,11 +422,14 @@ void applyState(JsonDocument &d) {
   if (d["text_size"].is<int>()) st.textSize = constrain(d["text_size"].as<int>(), 1, 4);
   if (d["scroll_delay"].is<int>()) st.scrollDelay = constrain(d["scroll_delay"].as<int>(), 1, 500);
   if (d["clock_24h"].is<bool>()) st.clock24 = d["clock_24h"].as<bool>();
+  if (d["life_run"].is<bool>()) st.lifeRun = d["life_run"].as<bool>();
+  if (d["life_speed"].is<int>()) st.lifeSpeed = constrain(d["life_speed"].as<int>(), 10, 2000);
+  if (d["life_wrap"].is<bool>()) st.lifeWrap = d["life_wrap"].as<bool>();
+  if (d["life_reseed"].is<bool>()) st.lifeReseed = d["life_reseed"].as<bool>();
 
   if (st.gif != prevGif || st.gifEnabled != prevGifEn) gifChange = true;
   if (st.overlay != prevOverlay || st.text != prevText || st.textSize != prevSize) {
     scrollX = PANEL_W;
-    if (st.overlay == "life" && prevOverlay != "life") lifeInit();
   }
   computeTextWidth();
   redrawOverlay = true;
@@ -387,6 +439,10 @@ void applyState(JsonDocument &d) {
 }
 
 void onMessage(char *topic, uint8_t *payload, unsigned int len) {
+  if (tLife == topic) {
+    loadLifePattern(payload, len);
+    return;
+  }
   JsonDocument d;
   if (deserializeJson(d, (const char *)payload, len)) return;
 
@@ -394,6 +450,14 @@ void onMessage(char *topic, uint8_t *payload, unsigned int len) {
     applyState(d);
   } else if (tCmd == topic) {
     if (d["reboot"].as<bool>()) pendingReboot = true;
+    if (d["life_step"].as<bool>()) {
+      lifeStep();
+      redrawOverlay = true;
+    }
+    if (d["life_random"].as<bool>()) {
+      lifeInit();
+      redrawOverlay = true;
+    }
     if (d["delete"].is<const char *>()) {
       String name = d["delete"].as<const char *>();
       if (name.indexOf('/') < 0 && name.length() > 0) {
@@ -445,6 +509,7 @@ void mqttTick() {
       mqtt.publish(tStatus.c_str(), "online", true);
       mqtt.subscribe(tSet.c_str(), 1);
       mqtt.subscribe(tCmd.c_str());
+      mqtt.subscribe(tLife.c_str(), 1);
       publishTelemetry();
       lastTelemetry = millis();
     } else {
@@ -527,6 +592,7 @@ void setup() {
   tCmd = String(BASE_TOPIC) + "/cmd";
   tStatus = String(BASE_TOPIC) + "/status";
   tTelemetry = String(BASE_TOPIC) + "/telemetry";
+  tLife = String(BASE_TOPIC) + "/life/set";
 
   WiFi.onEvent(onWiFiEvent);
   WiFi.persistent(false);          // don't keep stale credentials in flash
@@ -552,7 +618,7 @@ void setup() {
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
   mqtt.setCallback(onMessage);
-  mqtt.setBufferSize(1024);
+  mqtt.setBufferSize(2048);
   mqtt.setKeepAlive(30);
 
   // Boot screen: IP for 2 seconds
