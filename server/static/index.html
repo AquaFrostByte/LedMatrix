@@ -15,7 +15,7 @@
     --head: Arial, Helvetica, sans-serif;
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; scroll-padding-top: 52px; color-scheme: dark; }
+  html { scroll-behavior: smooth; scroll-padding-top: 16px; color-scheme: dark; }
   body {
     margin: 0; color: var(--text); font: 13px/1.55 var(--body);
     background: radial-gradient(900px 380px at 50% -120px, rgba(255, 30, 30, .13), transparent 70%), var(--bg);
@@ -26,13 +26,7 @@
   a:hover { color: #fff; text-decoration: underline; }
   :focus-visible { outline: 2px solid #ff6e6e; outline-offset: 2px; }
 
-  /* top bar, like the old sites */
-  .bar { position: sticky; top: 0; z-index: 10; background: var(--bar); border-bottom: 1px solid #1f1f1f; }
-  .barin { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
-  .nav { font-size: 12px; font-weight: bold; color: #555; min-width: 0; }
-  .nav a { color: #fff; margin: 0 4px; }
-  .nav a:first-child { margin-left: 0; }
-  .nav a:hover { color: var(--red); }
+  /* connection status */
   .pill { font-size: 11px; padding: 2px 10px; border-radius: 99px; border: 1px solid var(--line2); color: var(--mute); white-space: nowrap; }
   .pill.on { color: var(--ok); border-color: var(--ok); }
   .pill.off { color: var(--red); border-color: var(--red-dim); }
@@ -48,6 +42,7 @@
     animation: light-up 1.5s steps(28) 1 both;
   }
   @keyframes light-up { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  .bannerin .pill { position: absolute; top: 12px; right: 16px; }
   .bannerin { position: relative; display: flex; align-items: center; gap: 18px; padding-top: 26px; padding-bottom: 22px; }
   .logo { image-rendering: pixelated; filter: drop-shadow(0 0 10px var(--glow)); flex: none; }
   h1 { margin: 0; font: bold 30px/1.1 var(--head); letter-spacing: .02em; text-shadow: 0 0 20px rgba(255, 30, 30, .55); }
@@ -56,7 +51,7 @@
   /* layout: sidebar | content, split by a dashed line */
   .layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; padding-top: 22px; padding-bottom: 44px; }
   .layout > * { min-width: 0; }
-  .side { position: sticky; top: 52px; padding-right: 22px; border-right: 1px dashed var(--line2); }
+  .side { position: sticky; top: 16px; padding-right: 22px; border-right: 1px dashed var(--line2); }
   .main { padding-left: 28px; min-width: 0; }
 
   h2, .newshead { font: bold 15px/1.2 var(--head); color: var(--red); margin: 0 0 3px; }
@@ -140,9 +135,6 @@
     .main { padding-left: 0; }
     .now { display: grid; grid-template-columns: 110px 1fr; gap: 0 16px; align-items: start; }
     .now img, .now .blank { grid-row: 1 / span 4; margin: 0; max-width: 110px; }
-    .nav { overflow-x: auto; white-space: nowrap; scrollbar-width: none;
-      -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
-    .nav::-webkit-scrollbar { display: none; }
     .row > .k { min-width: 96px; }
     h1 { font-size: 24px; }
   }
@@ -154,11 +146,6 @@
 </head>
 <body>
 
-<nav class="bar"><div class="wrap barin">
-  <div class="nav"><a href="#top">Main</a> | <a href="#sec-display">Display</a> | <a href="#sec-mode">Mode</a> | <a href="#sec-life">Life</a> | <a href="#sec-editor">Editor</a> | <a href="#sec-gifs">GIFs</a> | <a href="#sec-device">Device</a></div>
-  <span id="conn" class="pill">…</span>
-</div></nav>
-
 <header class="banner" id="top">
   <div class="dots" aria-hidden="true"></div>
   <div class="wrap bannerin">
@@ -167,6 +154,7 @@
       <h1>LED Matrix</h1>
       <div class="tag">A 64×64 HUB75 panel on an ESP32.</div>
     </div>
+    <span id="conn" class="pill">…</span>
   </div>
 </header>
 
