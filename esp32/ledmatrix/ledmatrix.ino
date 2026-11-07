@@ -11,6 +11,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <LittleFS.h>
+#include <SD.h>
+#include <SPI.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
 #include <AnimatedGIF.h>
@@ -19,7 +21,13 @@
 #include <time.h>
 #include "config.h"
 
-#define FIRMWARE_VERSION "v1.0.0"
+#define FIRMWARE_VERSION "v1.1.1"
+
+// SD card (SPI). Override any of these in config.h if you wired it differently.
+#define SD_CS   23
+#define SD_SCK  19
+#define SD_MOSI 18
+#define SD_MISO 5
 
 #define PANEL_W 64
 #define PANEL_H 64
@@ -38,6 +46,8 @@ uint16_t bgBuf[PANEL_W * PANEL_H];    // GIF layer
 
 AnimatedGIF gif;
 File gifHandle;
+fs::FS *store = &LittleFS;   // where GIFs live: SD card if present, else internal flash
+bool usingSD = false;
 WiFiClient net;
 PubSubClient mqtt(net);
 
@@ -89,7 +99,7 @@ void present() {
 
 // ---------------------------------------------------------------- GIF
 void *GIFOpenFile(const char *fname, int32_t *pSize) {
-  gifHandle = LittleFS.open(fname);
+  gifHandle = store->open(fname);
   if (gifHandle) {
     *pSize = gifHandle.size();
     return (void *)&gifHandle;
@@ -156,7 +166,7 @@ void closeGif() {
 
 bool openGif(const String &name) {
   String path = "/" + name;
-  if (!LittleFS.exists(path)) return false;
+  if (!store->exists(path)) return false;
   if (gif.open(path.c_str(), GIFOpenFile, GIFCloseFile, GIFReadFile, GIFSeekFile, GIFDraw)) {
     gifOpen = true;
     nextFrameAt = millis();
@@ -169,7 +179,7 @@ bool openGif(const String &name) {
 // Download /gifs/<name> from the server into LittleFS if we don't have it yet
 bool ensureGif(const String &name) {
   String path = "/" + name;
-  if (LittleFS.exists(path)) return true;
+  if (store->exists(path)) return true;
   if (WiFi.status() != WL_CONNECTED) return false;
 
   String url = String(SERVER_URL) + "/gifs/" + name;
@@ -185,7 +195,8 @@ bool ensureGif(const String &name) {
   }
   int expected = http.getSize();
   String tmp = path + ".tmp";
-  File f = LittleFS.open(tmp, "w");
+  store->remove(tmp);  // leftover from an interrupted download
+  File f = store->open(tmp, FILE_WRITE);
   if (!f) {
     http.end();
     return false;
@@ -194,11 +205,11 @@ bool ensureGif(const String &name) {
   f.close();
   http.end();
   if (written <= 0 || (expected > 0 && written != expected)) {
-    Serial.println("Download incomplete (is LittleFS full?)");
-    LittleFS.remove(tmp);
+    Serial.println("Download incomplete (is the storage full?)");
+    store->remove(tmp);
     return false;
   }
-  LittleFS.rename(tmp, path);
+  store->rename(tmp, path);
   return true;
 }
 
@@ -390,7 +401,7 @@ void onMessage(char *topic, uint8_t *payload, unsigned int len) {
           closeGif();
           gifChange = true;  // will re-download if the server still has it
         }
-        LittleFS.remove("/" + name);
+        store->remove("/" + name);
       }
     }
   }
@@ -403,7 +414,9 @@ void publishTelemetry() {
   d["rssi"] = WiFi.RSSI();
   d["free_heap"] = ESP.getFreeHeap();
   d["uptime"] = millis() / 1000;
-  d["fs_free"] = LittleFS.totalBytes() - LittleFS.usedBytes();
+  d["storage"] = usingSD ? "sd" : "flash";
+  d["fs_free"] = usingSD ? (uint64_t)(SD.totalBytes() - SD.usedBytes())
+                         : (uint64_t)(LittleFS.totalBytes() - LittleFS.usedBytes());
   char buf[256];
   size_t n = serializeJson(d, buf, sizeof(buf));
   mqtt.publish(tTelemetry.c_str(), (const uint8_t *)buf, n, false);
@@ -411,9 +424,11 @@ void publishTelemetry() {
 
 void mqttTick() {
   if (WiFi.status() != WL_CONNECTED) {
-    if (millis() - lastWifiTry > 10000) {
+    if (millis() - lastWifiTry > 15000) {
       lastWifiTry = millis();
-      WiFi.reconnect();
+      Serial.println("WiFi: retrying...");
+      WiFi.disconnect();
+      WiFi.begin(WIFI_SSID, WIFI_PASS);
     }
     return;
   }
@@ -445,6 +460,17 @@ void mqttTick() {
 }
 
 // ---------------------------------------------------------------- setup / loop
+// Prints WHY the router dropped/refused us:
+//   2/6/7/202 = auth failed, 15 = 4-way handshake timeout (wrong password or WPA3/PMF problem),
+//   201 = SSID not found, 205 = connection failed, 17/13 = router refused (client limit / security mode)
+void onWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.printf("WiFi disconnected, reason=%d\n", info.wifi_sta_disconnected.reason);
+  } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.println("WiFi got IP: " + WiFi.localIP().toString());
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println("\nLED matrix " FIRMWARE_VERSION);
@@ -467,12 +493,34 @@ void setup() {
   fg->fillScreen(0);
   memset(bgBuf, 0, sizeof(bgBuf));
 
-  if (!LittleFS.begin(true)) {
-    Serial.println("LittleFS mount failed, rebooting");
-    delay(1000);
-    ESP.restart();
+  // Prefer the SD card; fall back to internal flash if there is none
+  Serial.printf("SD pins: CS=%d SCK=%d MISO=%d MOSI=%d\n", SD_CS, SD_SCK, SD_MISO, SD_MOSI);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  // Jumper wires often can't do 20 MHz, so retry slower before giving up
+  const uint32_t sdSpeeds[] = {20000000, 10000000, 4000000, 1000000};
+  for (uint32_t hz : sdSpeeds) {
+    if (SD.begin(SD_CS, SPI, hz)) {
+      store = &SD;
+      usingSD = true;
+      const char *types[] = {"none", "MMC", "SD", "SDHC", "unknown"};
+      Serial.printf("SD card mounted at %u kHz (%s): %llu MB total, %llu MB used\n", hz / 1000,
+                    types[min((int)SD.cardType(), 4)], SD.totalBytes() / (1024 * 1024),
+                    SD.usedBytes() / (1024 * 1024));
+      break;
+    }
+    Serial.printf("SD mount failed at %u kHz\n", hz / 1000);
+    SD.end();
+    delay(100);
   }
-  Serial.printf("LittleFS: %u / %u bytes used\n", (unsigned)LittleFS.usedBytes(), (unsigned)LittleFS.totalBytes());
+  if (!usingSD) {
+    Serial.println("SD card NOT found (check wiring: CS/SCK/MISO/MOSI, 3.3V/5V, FAT32). Using internal flash.");
+    if (!LittleFS.begin(true)) {
+      Serial.println("LittleFS mount failed, rebooting");
+      delay(1000);
+      ESP.restart();
+    }
+    Serial.printf("LittleFS: %u / %u bytes used\n", (unsigned)LittleFS.usedBytes(), (unsigned)LittleFS.totalBytes());
+  }
   gif.begin(LITTLE_ENDIAN_PIXELS);
 
   tSet = String(BASE_TOPIC) + "/set";
@@ -480,7 +528,12 @@ void setup() {
   tStatus = String(BASE_TOPIC) + "/status";
   tTelemetry = String(BASE_TOPIC) + "/telemetry";
 
+  WiFi.onEvent(onWiFiEvent);
+  WiFi.persistent(false);          // don't keep stale credentials in flash
+  WiFi.disconnect(true, true);     // wipe any saved WiFi state from earlier firmware
+  delay(300);
   WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
 #if USE_STATIC_IP
   WiFi.config(IPAddress(STATIC_IP), IPAddress(STATIC_GW), IPAddress(STATIC_MASK),
