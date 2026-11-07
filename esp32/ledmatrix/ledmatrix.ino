@@ -22,21 +22,19 @@
 #include "mbedtls/base64.h"
 #include "config.h"
 
-#define FIRMWARE_VERSION "v5.5.2"
+#define FIRMWARE_VERSION "v5.5.6"
+
+// The old firmware dimmed the GIF layer to 150/255, which keeps current draw (and heat) down.
+// 255 = no dimming. Override in config.h if you want brighter GIFs.
+#ifndef GIF_DIM
+#define GIF_DIM 150
+#endif
 
 // SD card (SPI). Override any of these in config.h if you wired it differently.
-#ifndef SD_CS
-#define SD_CS 5
-#endif
-#ifndef SD_SCK
-#define SD_SCK 18
-#endif
-#ifndef SD_MISO
-#define SD_MISO 19
-#endif
-#ifndef SD_MOSI
-#define SD_MOSI 23
-#endif
+#define SD_CS   23
+#define SD_SCK  19
+#define SD_MOSI 18
+#define SD_MISO 5
 
 #define PANEL_W 64
 #define PANEL_H 64
@@ -98,6 +96,14 @@ uint32_t lifeGen = 0;
 
 // ---------------------------------------------------------------- helpers
 uint16_t col(const uint8_t *c) { return dma_display->color565(c[0], c[1], c[2]); }
+
+// Scale an RGB565 pixel by GIF_DIM/255
+static inline uint16_t dimPx(uint16_t p) {
+  uint32_t r = ((p >> 11) & 31) * GIF_DIM / 255;
+  uint32_t g = ((p >> 5) & 63) * GIF_DIM / 255;
+  uint32_t b = (p & 31) * GIF_DIM / 255;
+  return (r << 11) | (g << 5) | b;
+}
 
 // Combine overlay over GIF and push to the panel (only when something changed)
 void present() {
@@ -166,9 +172,9 @@ void GIFDraw(GIFDRAW *pDraw) {
   if (pDraw->ucHasTransparency) {
     uint8_t t = pDraw->ucTransparent;
     for (int x = 0; x < iWidth; x++)
-      if (s[x] != t) row[x] = pal[s[x]];
+      if (s[x] != t) row[x] = dimPx(pal[s[x]]);
   } else {
-    for (int x = 0; x < iWidth; x++) row[x] = pal[s[x]];
+    for (int x = 0; x < iWidth; x++) row[x] = dimPx(pal[s[x]]);
   }
 }
 
@@ -599,7 +605,6 @@ void setup() {
   WiFi.disconnect(true, true);     // wipe any saved WiFi state from earlier firmware
   delay(300);
   WiFi.mode(WIFI_STA);
-  WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
 #if USE_STATIC_IP
   WiFi.config(IPAddress(STATIC_IP), IPAddress(STATIC_GW), IPAddress(STATIC_MASK),
