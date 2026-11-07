@@ -1,35 +1,44 @@
 services:
-  # Skip this service if you already run Mosquitto (e.g. the Home Assistant add-on)
-  # and set MQTT_HOST/MQTT_USER/MQTT_PASS in .env instead.
   mosquitto:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "1883:1883"
+      - 1883:1883
+    configs:
+      - source: mosquitto_conf
+        target: /mosquitto/config/mosquitto.conf
+    command: >
+      sh -c "rm -f /mosquitto/config/passwd && mosquitto_passwd -b -c
+      /mosquitto/config/passwd '${MQTT_USER}' '${MQTT_PASS}' && chown
+      mosquitto:mosquitto /mosquitto/config/passwd && chmod 600
+      /mosquitto/config/passwd && exec mosquitto -c
+      /mosquitto/config/mosquitto.conf"
     volumes:
-      - ./mosquitto:/mosquitto/config:ro   # mosquitto.conf + passwd (see README)
       - mosquitto-data:/mosquitto/data
-
   ledmatrix:
-    # Pulls the prebuilt image if LEDMATRIX_IMAGE points to ghcr.io,
-    # or builds it from ./server when you run `docker compose up -d --build`.
-    image: ${LEDMATRIX_IMAGE:-ledmatrix-server:local}
-    build: ./server
+    image: ghcr.io/aquafrostbyte/ledmatrix-server:latest
     restart: unless-stopped
     depends_on:
       - mosquitto
     ports:
-      - "8000:8000"
+      - 8086:8000
     environment:
-      MQTT_HOST: ${MQTT_HOST:-mosquitto}
-      MQTT_PORT: ${MQTT_PORT:-1883}
-      MQTT_USER: ${MQTT_USER:-}
-      MQTT_PASS: ${MQTT_PASS:-}
-      BASE_TOPIC: ${BASE_TOPIC:-ledmatrix}
+      MQTT_HOST: mosquitto
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASS: ${MQTT_PASS}
+      BASE_TOPIC: ledmatrix
       UI_USER: ${UI_USER:-}
       UI_PASS: ${UI_PASS:-}
     volumes:
       - ./data:/data
-
+configs:
+  mosquitto_conf:
+    content: |
+      listener 1883
+      allow_anonymous false
+      password_file /mosquitto/config/passwd
+      persistence true
+      persistence_location /mosquitto/data/
 volumes:
-  mosquitto-data:
+  mosquitto-data: null
+networks: {}
