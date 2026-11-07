@@ -4,176 +4,312 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>LED Matrix</title>
+<link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAcCAYAAAB/E6/TAAAAAXNSR0IArs4c6QAAAOJJREFUSIndlsENwjAMRZ8RV1gABNvABDAkTEC3AcECMIA5tBZJmoYWVUnFP1SKkzh+teVEGE+ampyNeFBSMmCtRSzBGIAri+imLS/ISTTvsUbrzw4AoVISBF2aFFFSG30CcJOlZ7fcWE4nUXVebtqzF+hBYpowUUOC7DscVlHfE6y6gMSJPFT0LxUhCntZUk6nMFNyX9aqU4A7JwDWHHHHKz00K+NV9nGUJitHZDKSh5w9uxFHcuT6bKlIZ6g7gfpXv0grwPCG7VWl5TuDQ9IV8ZD3Rj6i/zsoJv326vxF2YjeYfM092SZZUEAAAAASUVORK5CYII=">
 <style>
   :root {
-    --bg: #0f1115; --card: #181b22; --line: #2a2f3a; --text: #e8eaf0; --dim: #8b92a3;
-    --accent: #ffb938; --ok: #3ddc84; --bad: #ff5c5c;
-  }
-  @media (prefers-color-scheme: light) {
-    :root { --bg: #f2f3f6; --card: #fff; --line: #dcdfe6; --text: #1b1e25; --dim: #6a7180; }
+    --bg: #000; --bar: #131313; --panel: #0a0a0a;
+    --line: #2a1414; --line2: #4a1c1c;
+    --red: #ff1e1e; --red-dim: #8f1515; --glow: rgba(255, 30, 30, .4);
+    --text: #f2f2f2; --dim: #b0b0b0; --mute: #777; --ok: #3ddc84;
+    --body: Verdana, Geneva, "DejaVu Sans", sans-serif;
+    --head: Arial, Helvetica, sans-serif;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
-  main { max-width: 760px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
-  header { display: flex; justify-content: space-between; align-items: center; }
-  h1 { font-size: 20px; margin: 0; }
-  .pill { font-size: 12px; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+  html { scroll-behavior: smooth; scroll-padding-top: 52px; color-scheme: dark; }
+  body {
+    margin: 0; color: var(--text); font: 13px/1.55 var(--body);
+    background: radial-gradient(900px 380px at 50% -120px, rgba(255, 30, 30, .13), transparent 70%), var(--bg);
+    background-attachment: fixed;
+  }
+  .wrap { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+  a { color: var(--red); text-decoration: none; }
+  a:hover { color: #fff; text-decoration: underline; }
+  :focus-visible { outline: 2px solid #ff6e6e; outline-offset: 2px; }
+
+  /* top bar, like the old sites */
+  .bar { position: sticky; top: 0; z-index: 10; background: var(--bar); border-bottom: 1px solid #1f1f1f; }
+  .barin { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding-top: 6px; padding-bottom: 6px; }
+  .nav { font-size: 12px; font-weight: bold; color: #555; min-width: 0; }
+  .nav a { color: #fff; margin: 0 4px; }
+  .nav a:first-child { margin-left: 0; }
+  .nav a:hover { color: var(--red); }
+  .pill { font-size: 11px; padding: 2px 10px; border-radius: 99px; border: 1px solid var(--line2); color: var(--mute); white-space: nowrap; }
   .pill.on { color: var(--ok); border-color: var(--ok); }
-  .pill.off { color: var(--bad); border-color: var(--bad); }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
-  .card h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
-  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-  .row > label { min-width: 90px; color: var(--dim); }
-  .tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .pill.off { color: var(--red); border-color: var(--red-dim); }
+
+  /* banner: the dots light up column by column once on load */
+  .banner { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  .dots {
+    position: absolute; inset: 0; opacity: .3;
+    background-image: radial-gradient(circle, var(--red) 1.1px, transparent 1.7px);
+    background-size: 9px 9px;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 45%, #000 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 45%, #000 100%);
+    animation: light-up 1.5s steps(28) 1 both;
+  }
+  @keyframes light-up { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  .bannerin { position: relative; display: flex; align-items: center; gap: 18px; padding-top: 26px; padding-bottom: 22px; }
+  .logo { image-rendering: pixelated; filter: drop-shadow(0 0 10px var(--glow)); flex: none; }
+  h1 { margin: 0; font: bold 30px/1.1 var(--head); letter-spacing: .02em; text-shadow: 0 0 20px rgba(255, 30, 30, .55); }
+  .tag { color: var(--dim); font-size: 12px; margin-top: 4px; }
+
+  /* layout: sidebar | content, split by a dashed line */
+  .layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); align-items: start; padding-top: 22px; padding-bottom: 44px; }
+  .layout > * { min-width: 0; }
+  .side { position: sticky; top: 52px; padding-right: 22px; border-right: 1px dashed var(--line2); }
+  .main { padding-left: 28px; min-width: 0; }
+
+  h2, .newshead { font: bold 15px/1.2 var(--head); color: var(--red); margin: 0 0 3px; }
+  .newshead { margin-top: 18px; }
+  .newshead:first-child { margin-top: 0; }
+  .divider { color: var(--mute); font-size: 10px; white-space: nowrap; overflow: hidden; margin-bottom: 10px; }
+  .divider::after { content: "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - "; }
+  .linklist { line-height: 1.9; }
+  .linklist b { color: var(--mute); margin-right: 3px; }
+
+  .now img { display: block; width: 100%; max-width: 150px; aspect-ratio: 1; image-rendering: pixelated; background: #000;
+    border: 1px solid var(--red-dim); border-radius: 4px; box-shadow: 0 0 24px var(--glow); margin-bottom: 10px; }
+  .now img[hidden], .now .blank[hidden] { display: none; }
+  .now .blank { width: 100%; max-width: 150px; aspect-ratio: 1; border: 1px solid var(--line2); border-radius: 4px; margin-bottom: 10px;
+    display: grid; place-items: center; color: var(--mute); font-size: 11px;
+    background-image: radial-gradient(circle, #3a1212 1px, transparent 1.6px); background-size: 8px 8px; }
+  .kv { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; padding: 2px 0; }
+  .kv span { color: var(--mute); }
+  .kv b { color: #fff; font-weight: normal; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .sec { padding-bottom: 26px; }
+  .sec + .sec { border-top: 1px dashed var(--line2); padding-top: 20px; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 6px 0; }
+  .row > .k { min-width: 110px; color: var(--dim); }
+  .tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 4px 0; }
   .tools label { color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
   .grow { flex: 1; min-width: 120px; }
   .cl { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); }
-  input[type=range] { width: 100%; accent-color: var(--accent); }
+  .msg { font-size: 12px; color: var(--mute); min-height: 1.3em; }
+  .val { color: var(--dim); min-width: 52px; text-align: right; }
+
+  /* controls */
+  input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 4px; outline-offset: 6px;
+    background: linear-gradient(90deg, var(--red-dim), var(--red)); }
   .tools input[type=range] { width: 110px; }
-  input[type=text], select { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
-  input[type=color] { width: 44px; height: 34px; border: 1px solid var(--line); border-radius: 8px; background: none; padding: 2px; }
-  button { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; font: inherit; cursor: pointer; }
-  button:hover { border-color: var(--accent); }
-  button.primary { background: var(--accent); color: #1b1300; border-color: var(--accent); font-weight: 600; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-  .seg button { border: 0; border-radius: 0; }
-  .seg button.active { background: var(--accent); color: #1b1300; font-weight: 600; }
-  .switch { position: relative; width: 44px; height: 24px; flex: none; }
-  .switch input { opacity: 0; width: 0; height: 0; }
-  .switch span { position: absolute; inset: 0; background: var(--line); border-radius: 99px; transition: .15s; cursor: pointer; }
-  .switch span::before { content: ""; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
-  .switch input:checked + span { background: var(--accent); }
-  .switch input:checked + span::before { transform: translateX(20px); }
-  .gifs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; }
-  .gif { border: 1px solid var(--line); border-radius: 10px; padding: 8px; display: grid; gap: 6px; justify-items: center; }
-  .gif.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .gif img { width: 96px; height: 96px; image-rendering: pixelated; background: #000; border-radius: 4px; cursor: pointer; }
-  .gif .name { font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gif button { padding: 3px 8px; font-size: 12px; }
-  .drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--dim); cursor: pointer; }
-  .drop.over { border-color: var(--accent); color: var(--text); }
-  .msg { font-size: 13px; color: var(--dim); min-height: 1.2em; }
-  #lifeCv { width: 100%; max-width: 640px; aspect-ratio: 1; display: block; margin: 0 auto; cursor: crosshair;
-    touch-action: none; border: 1px solid var(--line); border-radius: 8px; background: #1a1e27; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #fff;
+    border: 2px solid var(--red); box-shadow: 0 0 10px var(--glow); cursor: pointer; }
+  input[type=range]::-moz-range-thumb { width: 11px; height: 11px; border-radius: 50%; background: #fff; border: 2px solid var(--red); cursor: pointer; }
+  input[type=text], select { background: #000; color: #fff; border: 1px solid var(--red-dim); border-radius: 6px; padding: 7px 10px; font: inherit; }
+  input[type=text]:focus, select:focus { outline: 1px solid #ff6e6e; background: #111; }
+  input[type=color] { width: 40px; height: 30px; border: 1px solid var(--red-dim); border-radius: 6px; background: #000; padding: 2px; cursor: pointer; }
+  input[type=checkbox] { accent-color: var(--red); }
+  button { background: #000; color: var(--red); border: 1px solid var(--red-dim); border-radius: 6px; padding: 7px 14px; font: inherit; cursor: pointer;
+    transition: border-color .15s, box-shadow .15s, color .15s; }
+  button:hover { border-color: var(--red); color: #fff; box-shadow: 0 0 12px var(--glow); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--red); color: #000; border-color: var(--red); font-weight: bold; }
+  button.primary:hover { color: #000; filter: brightness(1.15); }
+  .seg { display: inline-flex; border: 1px solid var(--red-dim); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; box-shadow: none; }
+  .seg button + button { border-left: 1px solid var(--red-dim); }
+  .seg button.active { background: var(--red); color: #000; font-weight: bold; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+  .switch span { position: absolute; inset: 0; background: #1c1c1c; border: 1px solid #3a3a3a; border-radius: 99px; transition: .15s; cursor: pointer; }
+  .switch span::before { content: ""; position: absolute; width: 14px; height: 14px; left: 3px; top: 3px; background: #888; border-radius: 50%; transition: .15s; }
+  .switch input:checked + span { background: var(--red); border-color: var(--red); box-shadow: 0 0 12px var(--glow); }
+  .switch input:checked + span::before { transform: translateX(18px); background: #000; }
+  .switch input:focus-visible + span { outline: 2px solid #ff6e6e; outline-offset: 2px; }
+
+  /* gifs and editor */
+  .gifs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .gif { border: 1px solid var(--line2); border-radius: 6px; padding: 8px; display: grid; gap: 6px; justify-items: center; }
+  .gif.active { border-color: var(--red); box-shadow: 0 0 16px var(--glow); }
+  .gif img { width: 96px; height: 96px; image-rendering: pixelated; background: #000; border-radius: 3px; cursor: pointer; }
+  .gif .name { font-size: 11px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+  .gif button { padding: 3px 9px; font-size: 11px; }
+  .drop { border: 1px dashed var(--red-dim); border-radius: 6px; padding: 18px; text-align: center; color: var(--mute); cursor: pointer; margin-bottom: 8px; }
+  .drop:hover, .drop.over { border-color: var(--red); color: #fff; }
+  #lifeCv { width: 100%; max-width: 640px; aspect-ratio: 1; display: block; margin: 4px 0 10px; cursor: crosshair; touch-action: none;
+    border: 1px solid var(--red-dim); border-radius: 4px; background: #1b1010; }
+
+  .foot { background: var(--bar); border-top: 1px solid #1f1f1f; padding: 10px 0; font-size: 12px; color: var(--dim); }
+  .foot a { color: #fff; }
+  .foot a:hover { color: var(--red); }
+
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .side { position: static; padding: 0 0 16px; margin-bottom: 18px; border-right: 0; border-bottom: 1px dashed var(--line2); }
+    .side .nav-block { display: none; }
+    .main { padding-left: 0; }
+    .now { display: grid; grid-template-columns: 110px 1fr; gap: 0 16px; align-items: start; }
+    .now img, .now .blank { grid-row: 1 / span 4; margin: 0; max-width: 110px; }
+    .nav { overflow-x: auto; white-space: nowrap; scrollbar-width: none;
+      -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+    .nav::-webkit-scrollbar { display: none; }
+    .row > .k { min-width: 96px; }
+    h1 { font-size: 24px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dots { animation: none; }
+    html { scroll-behavior: auto; }
+  }
 </style>
 </head>
 <body>
-<main>
-  <header>
-    <h1>LED Matrix</h1>
-    <span id="conn" class="pill">…</span>
-  </header>
 
-  <section class="card">
-    <h2>Display</h2>
-    <div class="row"><label>Power</label>
-      <label class="switch"><input type="checkbox" id="power"><span></span></label></div>
-    <div class="row"><label>Brightness</label>
-      <div class="grow"><input type="range" id="brightness" min="0" max="255"></div><span id="brightnessVal"></span></div>
-    <div class="row"><label>Colours</label>
-      <span class="cl">Clock <input type="color" id="clock_color"></span>
-      <span class="cl">Text <input type="color" id="text_color"></span>
-      <span class="cl">Life <input type="color" id="life_color"></span>
-      <button id="sameColor" title="Use the clock colour for text and Game of Life too">Same for all</button></div>
-  </section>
+<nav class="bar"><div class="wrap barin">
+  <div class="nav"><a href="#top">Main</a> | <a href="#sec-display">Display</a> | <a href="#sec-mode">Mode</a> | <a href="#sec-life">Life</a> | <a href="#sec-editor">Editor</a> | <a href="#sec-gifs">GIFs</a> | <a href="#sec-device">Device</a></div>
+  <span id="conn" class="pill">…</span>
+</div></nav>
 
-  <section class="card">
-    <h2>Mode</h2>
-    <div class="row"><label>GIF background</label>
-      <label class="switch"><input type="checkbox" id="gif_enabled"><span></span></label></div>
-    <div class="row"><label>Overlay</label>
-      <div class="seg" id="overlay">
-        <button data-v="none">None</button><button data-v="clock">Clock</button>
-        <button data-v="text">Text</button><button data-v="life">Life</button>
-      </div></div>
-    <div class="row"><label>24h clock</label>
-      <label class="switch"><input type="checkbox" id="clock_24h"><span></span></label></div>
-    <div class="row"><label>Text</label>
-      <input type="text" id="text" class="grow" maxlength="100" placeholder="Scrolling text">
-      <select id="text_size">
-        <option value="1">Small</option><option value="2">Normal</option>
-        <option value="3">Big</option><option value="4">Huge</option>
-      </select></div>
-    <div class="row"><label>Scroll delay</label>
-      <div class="grow"><input type="range" id="scroll_delay" min="1" max="150"></div>
-      <span id="scrollVal"></span></div>
-  </section>
+<header class="banner" id="top">
+  <div class="dots" aria-hidden="true"></div>
+  <div class="wrap bannerin">
+    <img class="logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABoAAAAcCAYAAAB/E6/TAAAAAXNSR0IArs4c6QAAAOJJREFUSIndlsENwjAMRZ8RV1gABNvABDAkTEC3AcECMIA5tBZJmoYWVUnFP1SKkzh+teVEGE+ampyNeFBSMmCtRSzBGIAri+imLS/ISTTvsUbrzw4AoVISBF2aFFFSG30CcJOlZ7fcWE4nUXVebtqzF+hBYpowUUOC7DscVlHfE6y6gMSJPFT0LxUhCntZUk6nMFNyX9aqU4A7JwDWHHHHKz00K+NV9nGUJitHZDKSh5w9uxFHcuT6bKlIZ6g7gfpXv0grwPCG7VWl5TuDQ9IV8ZD3Rj6i/zsoJv326vxF2YjeYfM092SZZUEAAAAASUVORK5CYII=" width="52" height="56" alt="">
+    <div>
+      <h1>LED Matrix</h1>
+      <div class="tag">A 64×64 HUB75 panel on an ESP32.</div>
+    </div>
+  </div>
+</header>
 
-  <section class="card">
-    <h2>Game of Life</h2>
-    <div class="row"><label>Running</label>
-      <label class="switch"><input type="checkbox" id="life_run"><span></span></label>
-      <button id="lifeStepBtn">Step</button>
-      <button id="lifeRandom">Random</button></div>
-    <div class="row"><label>Step time</label>
-      <div class="grow"><input type="range" id="life_speed" min="10" max="1000" step="10"></div>
-      <span id="lifeSpeedVal"></span></div>
-    <div class="row"><label>Wrap edges</label>
-      <label class="switch"><input type="checkbox" id="life_wrap"><span></span></label>
-      <span class="msg">off = gliders die at the border</span></div>
-    <div class="row"><label>Auto-restart</label>
-      <label class="switch"><input type="checkbox" id="life_reseed"><span></span></label>
-      <span class="msg">random restart when it dies out</span></div>
-  </section>
-
-  <section class="card">
-    <h2>Pattern editor (64 × 64)</h2>
-    <canvas id="lifeCv"></canvas>
-    <div class="tools">
-      <div class="seg" id="tool">
-        <button data-v="draw" class="active">Draw</button><button data-v="erase">Erase</button><button data-v="stamp">Stamp</button>
+<div class="wrap layout">
+  <aside class="side">
+    <div class="nav-block">
+      <div class="newshead">[Navigation]</div><div class="divider"></div>
+      <div class="linklist">
+        <b>&gt;</b> <a href="#sec-display">Display</a><br>
+        <b>&gt;</b> <a href="#sec-mode">Mode</a><br>
+        <b>&gt;</b> <a href="#sec-life">Game of Life</a><br>
+        <b>&gt;</b> <a href="#sec-editor">Pattern editor</a><br>
+        <b>&gt;</b> <a href="#sec-gifs">GIFs</a><br>
+        <b>&gt;</b> <a href="#sec-device">Device</a>
       </div>
-      <select id="preset"></select>
-      <button id="rot">Rotate</button>
-      <button id="flip">Mirror</button>
     </div>
-    <div class="tools">
-      <button id="simRun">▶ Run here</button>
-      <button id="simStep">Step</button>
-      <button id="simReset">Reset</button>
-      <button id="clear">Clear</button>
+    <div class="newshead">[Now showing]</div><div class="divider"></div>
+    <div class="now">
+      <img id="nowImg" alt="Current GIF" hidden>
+      <div id="nowBlank" class="blank">no gif</div>
+      <div class="kv"><span>GIF</span><b id="nowGif">-</b></div>
+      <div class="kv"><span>Overlay</span><b id="nowOverlay">-</b></div>
+      <div class="kv"><span>Power</span><b id="nowPower">-</b></div>
+      <div class="kv"><span>Address</span><b id="sideDev">-</b></div>
     </div>
-    <div class="tools">
-      <button class="primary" id="send">Send to display</button>
-      <label><input type="checkbox" id="sendRun" checked> start running</label>
-      <button id="loadCur">Load what's on the display</button>
-    </div>
-    <div class="tools">
-      <button id="importBtn">Import image…</button>
-      <input type="file" id="imgFile" accept="image/*" hidden>
-      <label>Threshold <input type="range" id="thr" min="1" max="254" value="128"></label>
-      <label><input type="checkbox" id="inv"> invert</label>
-    </div>
-    <div class="tools">
-      <input type="text" id="patName" placeholder="Name" maxlength="32" style="width:140px">
-      <button id="patSave">Save</button>
-      <select id="patList"></select>
-      <button id="patLoad">Load</button>
-      <button id="patDel">Delete</button>
-    </div>
-    <div class="msg" id="lmsg">Click or drag to draw. Choose a preset and "Stamp" to place it. "Run here" simulates in your browser; "Send to display" puts the current grid on the matrix.</div>
-  </section>
+  </aside>
 
-  <section class="card">
-    <h2>GIFs</h2>
-    <div class="gifs" id="gifs"></div>
-    <div class="drop" id="drop">Drop GIF / PNG / JPG here or click to upload
-      <input type="file" id="file" accept="image/*" multiple hidden></div>
-    <div class="row"><label>Fit</label>
-      <select id="fit">
-        <option value="contain">Contain (keep aspect)</option>
-        <option value="cover">Cover (crop)</option>
-        <option value="stretch">Stretch</option>
-      </select></div>
-    <div class="msg" id="msg"></div>
-  </section>
+  <main class="main">
+    <section class="sec" id="sec-display">
+      <h2>[Display]</h2><div class="divider"></div>
+      <div class="row"><label class="k">Power</label>
+        <label class="switch"><input type="checkbox" id="power"><span></span></label></div>
+      <div class="row"><label class="k">Brightness</label>
+        <div class="grow"><input type="range" id="brightness" min="0" max="255"></div><span class="val" id="brightnessVal"></span></div>
+      <div class="row"><label class="k">Colours</label>
+        <span class="cl">Clock <input type="color" id="clock_color"></span>
+        <span class="cl">Text <input type="color" id="text_color"></span>
+        <span class="cl">Life <input type="color" id="life_color"></span>
+        <button id="sameColor" title="Use the clock colour for text and Game of Life too">Same for all</button></div>
+    </section>
 
-  <section class="card">
-    <h2>Device</h2>
-    <div class="msg" id="device"></div>
-    <div class="row"><button id="reboot">Reboot ESP32</button></div>
-  </section>
-</main>
+    <section class="sec" id="sec-mode">
+      <h2>[Mode]</h2><div class="divider"></div>
+      <div class="row"><label class="k">GIF background</label>
+        <label class="switch"><input type="checkbox" id="gif_enabled"><span></span></label></div>
+      <div class="row"><label class="k">Overlay</label>
+        <div class="seg" id="overlay">
+          <button data-v="none">None</button><button data-v="clock">Clock</button>
+          <button data-v="text">Text</button><button data-v="life">Life</button>
+        </div></div>
+      <div class="row"><label class="k">24h clock</label>
+        <label class="switch"><input type="checkbox" id="clock_24h"><span></span></label></div>
+      <div class="row"><label class="k">Text</label>
+        <input type="text" id="text" class="grow" maxlength="100" placeholder="Scrolling text">
+        <select id="text_size">
+          <option value="1">Small</option><option value="2">Normal</option>
+          <option value="3">Big</option><option value="4">Huge</option>
+        </select></div>
+      <div class="row"><label class="k">Scroll delay</label>
+        <div class="grow"><input type="range" id="scroll_delay" min="1" max="150"></div>
+        <span class="val" id="scrollVal"></span></div>
+    </section>
+
+    <section class="sec" id="sec-life">
+      <h2>[Game of Life]</h2><div class="divider"></div>
+      <div class="row"><label class="k">Running</label>
+        <label class="switch"><input type="checkbox" id="life_run"><span></span></label>
+        <button id="lifeStepBtn">Step</button>
+        <button id="lifeRandom">Random</button></div>
+      <div class="row"><label class="k">Step time</label>
+        <div class="grow"><input type="range" id="life_speed" min="10" max="1000" step="10"></div>
+        <span class="val" id="lifeSpeedVal"></span></div>
+      <div class="row"><label class="k">Wrap edges</label>
+        <label class="switch"><input type="checkbox" id="life_wrap"><span></span></label>
+        <span class="msg">Off: gliders die at the border.</span></div>
+      <div class="row"><label class="k">Auto-restart</label>
+        <label class="switch"><input type="checkbox" id="life_reseed"><span></span></label>
+        <span class="msg">Restart with random cells when it dies out.</span></div>
+    </section>
+
+    <section class="sec" id="sec-editor">
+      <h2>[Pattern editor]</h2><div class="divider"></div>
+      <canvas id="lifeCv"></canvas>
+      <div class="tools">
+        <div class="seg" id="tool">
+          <button data-v="draw" class="active">Draw</button><button data-v="erase">Erase</button><button data-v="stamp">Stamp</button>
+        </div>
+        <select id="preset"></select>
+        <button id="rot">Rotate</button>
+        <button id="flip">Mirror</button>
+      </div>
+      <div class="tools">
+        <button id="simRun">▶ Run here</button>
+        <button id="simStep">Step</button>
+        <button id="simReset">Reset</button>
+        <button id="clear">Clear</button>
+      </div>
+      <div class="tools">
+        <button class="primary" id="send">Send to display</button>
+        <label><input type="checkbox" id="sendRun" checked> Start running</label>
+        <button id="loadCur">Load what's on the display</button>
+      </div>
+      <div class="tools">
+        <button id="importBtn">Import image…</button>
+        <input type="file" id="imgFile" accept="image/*" hidden>
+        <label>Threshold <input type="range" id="thr" min="1" max="254" value="128"></label>
+        <label><input type="checkbox" id="inv"> Invert</label>
+      </div>
+      <div class="tools">
+        <input type="text" id="patName" placeholder="Name" maxlength="32" style="width:140px">
+        <button id="patSave">Save</button>
+        <select id="patList"></select>
+        <button id="patLoad">Load</button>
+        <button id="patDel">Delete</button>
+      </div>
+      <div class="msg" id="lmsg">Click or drag to draw. Pick a preset and choose Stamp to place it. Run here simulates in your browser; Send to display puts the current grid on the matrix.</div>
+    </section>
+
+    <section class="sec" id="sec-gifs">
+      <h2>[GIFs]</h2><div class="divider"></div>
+      <div class="gifs" id="gifs"></div>
+      <div class="drop" id="drop">Drop GIF / PNG / JPG here or click to upload
+        <input type="file" id="file" accept="image/*" multiple hidden></div>
+      <div class="row"><label class="k">Fit</label>
+        <select id="fit">
+          <option value="contain">Contain (keep aspect)</option>
+          <option value="cover">Cover (crop)</option>
+          <option value="stretch">Stretch</option>
+        </select></div>
+      <div class="msg" id="msg"></div>
+    </section>
+
+    <section class="sec" id="sec-device">
+      <h2>[Device]</h2><div class="divider"></div>
+      <div class="msg" id="device"></div>
+      <div class="row"><button id="reboot">Reboot ESP32</button></div>
+    </section>
+  </main>
+</div>
+
+<footer class="foot"><div class="wrap">
+  <a href="#top">Main</a> | <a href="#sec-display">Display</a> | <a href="#sec-editor">Editor</a> | <a href="#sec-gifs">GIFs</a> | - © 2026 : LED Matrix -- [<a href="https://github.com/AquaFrostByte/LedMatrix">GitHub</a>]
+</div></footer>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -225,10 +361,21 @@ function render(data) {
   c.textContent = e.online ? 'ESP32 online' : (e.mqtt ? 'ESP32 offline' : 'MQTT down');
   c.className = 'pill ' + (e.online ? 'on' : 'off');
   $('device').textContent = e.online && e.ip
-    ? `${e.ip} · ${e.rssi} dBm · ${Math.round((e.free_heap || 0) / 1024)} KB heap free · fw ${e.fw}`
-      + (e.storage ? ` · ${e.storage === 'sd' ? 'SD card' : 'flash'} ${fmtBytes(e.fs_free || 0)} free` : '')
-      + ` · up ${Math.round((e.uptime || 0) / 60)} min`
+    ? `${e.ip} | ${e.rssi} dBm | ${Math.round((e.free_heap || 0) / 1024)} KB heap free | firmware ${e.fw}`
+      + (e.storage ? ` | ${e.storage === 'sd' ? 'SD card' : 'flash'} ${fmtBytes(e.fs_free || 0)} free` : '')
+      + ` | up ${Math.round((e.uptime || 0) / 60)} min`
     : 'No telemetry yet.';
+
+  // sidebar: what the panel is showing
+  const showGif = S.gif_enabled && S.gif;
+  const ni = $('nowImg');
+  if (showGif) { if (ni.dataset.src !== S.gif) { ni.src = '/gifs/' + S.gif; ni.dataset.src = S.gif; } }
+  else { ni.removeAttribute('src'); delete ni.dataset.src; }
+  ni.hidden = !showGif; $('nowBlank').hidden = !!showGif;
+  $('nowGif').textContent = showGif ? S.gif : '-';
+  $('nowOverlay').textContent = S.overlay;
+  $('nowPower').textContent = S.power ? 'on' : 'off';
+  $('sideDev').textContent = e.online && e.ip ? e.ip : '-';
 
   drawEditor();
   const box = $('gifs');
@@ -236,10 +383,10 @@ function render(data) {
   if (box.dataset.sig === sig) return;
   box.dataset.sig = sig;
   box.replaceChildren();
-  if (!gifs.length) box.textContent = 'No GIFs yet — upload one below.';
+  if (!gifs.length) box.textContent = 'No GIFs yet. Upload one below.';
   for (const n of gifs) {
     const d = document.createElement('div'); d.className = 'gif' + (n === S.gif ? ' active' : '');
-    const img = document.createElement('img'); img.src = '/gifs/' + n; img.onclick = () => patch({gif: n, gif_enabled: true});
+    const img = document.createElement('img'); img.src = '/gifs/' + n; img.alt = n; img.onclick = () => patch({gif: n, gif_enabled: true});
     const nm = document.createElement('div'); nm.className = 'name'; nm.textContent = n;
     const del = document.createElement('button'); del.textContent = 'Delete';
     del.onclick = async () => { if (confirm('Delete ' + n + '?')) { await api('/api/gifs/' + n, {method: 'DELETE'}); refresh(); } };
@@ -343,13 +490,13 @@ for (const name of Object.keys(PRESETS)) {
 
 function drawEditor() {
   const on = hex(S.life_color || [0, 255, 100]);
-  ctx.fillStyle = '#1a1e27'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#1b1010'; ctx.fillRect(0, 0, cv.width, cv.height);
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
-    ctx.fillStyle = grid[y * N + x] ? on : '#0c0e13';
+    ctx.fillStyle = grid[y * N + x] ? on : '#070707';
     ctx.fillRect(x * CELL + 0.5, y * CELL + 0.5, CELL - 1, CELL - 1);
   }
   if (tool === 'stamp' && hover) {
-    ctx.fillStyle = 'rgba(255,185,56,.55)';
+    ctx.fillStyle = 'rgba(255,30,30,.6)';
     const ox = hover[0] - (stampPat.w >> 1), oy = hover[1] - (stampPat.h >> 1);
     for (const [dx, dy] of stampPat.cells) ctx.fillRect((ox + dx) * CELL + 0.5, (oy + dy) * CELL + 0.5, CELL - 1, CELL - 1);
   }
