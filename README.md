@@ -2,6 +2,9 @@
 
 The revised architecture transitions the ESP32 into a lightweight, high-performance thin client. By offloading heavy processing (web hosting, file conversions, state management) to a central server, the ESP32 is freed up to focus exclusively on hardware-level rendering and MQTT communication. All media uploads are pre-processed and resized to 64×64 on the server, ensuring the ESP32 only handles optimized, lightweight files.
 
+You have to host ur own MQTT SERVER!! Using https://mosquitto.org/ 
+Default settings are fine!
+
 ```text
 Browser / Home Assistant ──► Server (FastAPI, :8000) ──MQTT──► ESP32 (HUB75 64x64)
                                   │                            ▲
